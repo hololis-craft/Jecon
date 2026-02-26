@@ -21,6 +21,12 @@ import java.util.UUID;
 import java.util.logging.Logger;
 
 public abstract class Database {
+    public static final int LOG_DEPOSIT  = 1;
+    public static final int LOG_WITHDRAW = 2;
+    public static final int LOG_SET      = 3;
+    public static final int LOG_CREATE   = 4;
+    public static final int LOG_REMOVE   = 5;
+
     protected final HikariDataSource hikari;
 
     protected Database(HikariDataSource hikari) {
@@ -185,6 +191,21 @@ public abstract class Database {
             return (statement.executeUpdate() != 0);
         } catch (SQLException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    public void logTransaction(int type, UUID uuid, long amount) {
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "INSERT INTO `transaction_log` (`timestamp`,`type`,`uuid`,`amount`) VALUES (?,?,?,?)"
+             )) {
+            statement.setLong(1, System.currentTimeMillis());
+            statement.setInt(2, type);
+            statement.setBytes(3, UUIDBytes.toBytes(uuid));
+            statement.setLong(4, amount);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            Jecon.getInstance().getLogger().warning("Failed to log transaction: " + e.getMessage());
         }
     }
 

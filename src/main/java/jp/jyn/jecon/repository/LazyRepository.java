@@ -116,6 +116,8 @@ public class LazyRepository extends AbstractRepository {
     public boolean removeAccount(UUID uuid) {
         balanceCache.put(uuid, OptionalLong.empty());
         dbBalance.put(uuid, OptionalLong.empty());
-        return db.removeAccount(getId(uuid));
+        boolean result = db.removeAccount(getId(uuid));
+        if (result) logIfEnabled(Database.LOG_REMOVE, uuid, 0);
+        return result;
     }
 }

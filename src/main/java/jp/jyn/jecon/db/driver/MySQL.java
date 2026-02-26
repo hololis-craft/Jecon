@@ -32,6 +32,15 @@ public class MySQL extends Database {
                     "`balance` BIGINT NOT NULL " +
                     ")"
             );
+            statement.executeUpdate(
+                "CREATE TABLE IF NOT EXISTS `transaction_log` (" +
+                    "`id`        INT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT," +
+                    "`timestamp` BIGINT       NOT NULL," +
+                    "`type`      TINYINT      NOT NULL," +
+                    "`uuid`      BINARY(16)   NOT NULL," +
+                    "`amount`    BIGINT       NOT NULL" +
+                    ")"
+            );
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }

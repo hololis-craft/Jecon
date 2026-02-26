@@ -10,6 +10,9 @@ createAccountOnJoin: true
 # If you need to keep players balance always accurate, disable this feature.
 lazyWrite: true
 
+# Transaction logging: record all balance changes to transaction_log table.
+transactionLog: true
+
 format:
   singularMajor: "dollar"
   pluralMajor: "dollars"

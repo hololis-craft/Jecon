@@ -31,6 +31,15 @@ public class SQLite extends Database {
                     "`balance` INTEGER NOT NULL" +
                     ")"
             );
+            statement.executeUpdate(
+                "CREATE TABLE IF NOT EXISTS `transaction_log` (" +
+                    "`id`        INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT," +
+                    "`timestamp` INTEGER NOT NULL," +
+                    "`type`      INTEGER NOT NULL," +
+                    "`uuid`      BLOB    NOT NULL," +
+                    "`amount`    INTEGER NOT NULL" +
+                    ")"
+            );
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }

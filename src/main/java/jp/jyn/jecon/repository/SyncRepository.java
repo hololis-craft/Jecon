@@ -33,6 +33,8 @@ public class SyncRepository extends AbstractRepository {
 
     @Override
     public boolean removeAccount(UUID uuid) {
-        return db.removeAccount(getId(uuid));
+        boolean result = db.removeAccount(getId(uuid));
+        if (result) logIfEnabled(Database.LOG_REMOVE, uuid, 0);
+        return result;
     }
 }
