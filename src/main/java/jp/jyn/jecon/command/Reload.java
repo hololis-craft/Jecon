@@ -1,50 +1,47 @@
 package jp.jyn.jecon.command;
 
-import jp.jyn.jbukkitlib.command.SubCommand;
+import com.mojang.brigadier.Command;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.context.CommandContext;
+import io.papermc.paper.command.brigadier.CommandSourceStack;
+import io.papermc.paper.command.brigadier.Commands;
 import jp.jyn.jecon.Jecon;
+import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MessageConfig;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.server.PluginDisableEvent;
 import org.bukkit.event.server.PluginEnableEvent;
-import org.bukkit.plugin.Plugin;
 
-import java.util.Queue;
+@SuppressWarnings("UnstableApiUsage")
+public class Reload {
+    private final Jecon plugin;
+    private final ConfigLoader config;
 
-public class Reload extends SubCommand {
-    private final MessageConfig message;
-
-    public Reload(MessageConfig message) {
-        this.message = message;
+    public Reload(Jecon plugin, ConfigLoader config) {
+        this.plugin = plugin;
+        this.config = config;
     }
 
-    @Override
-    protected Result onCommand(CommandSender sender, Queue<String> args) {
-        Plugin plugin = Jecon.getInstance();
+    public LiteralArgumentBuilder<CommandSourceStack> create() {
+        return Commands.literal("reload")
+                .requires(s -> s.getSender().hasPermission("jecon.reload"))
+                .executes(this::execute);
+    }
+
+    private int execute(CommandContext<CommandSourceStack> ctx) {
         plugin.getServer().getPluginManager().callEvent(new PluginDisableEvent(plugin));
         plugin.onDisable();
         plugin.onEnable();
         plugin.getServer().getPluginManager().callEvent(new PluginEnableEvent(plugin));
 
+        CommandSender sender = ctx.getSource().getSender();
+        MessageConfig message = config.getMessageConfig();
         sender.sendMessage(message.reloaded.toString());
         if (sender instanceof Player) {
             Bukkit.getConsoleSender().sendMessage(message.reloaded.toString());
         }
-
-        return Result.OK;
-    }
-
-    @Override
-    protected String requirePermission() {
-        return "jecon.reload";
-    }
-
-    @Override
-    public CommandHelp getHelp() {
-        return new CommandHelp(
-            "/money reload",
-            message.help.reload.toString()
-        );
+        return Command.SINGLE_SUCCESS;
     }
 }

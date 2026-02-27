@@ -1,42 +1,48 @@
 package jp.jyn.jecon.command;
 
-import jp.jyn.jbukkitlib.command.SubCommand;
+import com.mojang.brigadier.Command;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.context.CommandContext;
+import io.papermc.paper.command.brigadier.CommandSourceStack;
+import io.papermc.paper.command.brigadier.Commands;
 import jp.jyn.jbukkitlib.config.parser.template.variable.StringVariable;
 import jp.jyn.jbukkitlib.config.parser.template.variable.TemplateVariable;
 import jp.jyn.jbukkitlib.uuid.UUIDRegistry;
-import jp.jyn.jecon.repository.BalanceRepository;
+import jp.jyn.jecon.Jecon;
+import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MessageConfig;
+import jp.jyn.jecon.repository.BalanceRepository;
 import org.bukkit.command.CommandSender;
 
 import java.math.BigDecimal;
-import java.util.Collections;
-import java.util.Deque;
-import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.UUID;
 
-public class Top extends SubCommand {
-    private final static int ENTRY_PER_PAGE = 10;
-    private final MessageConfig message;
-    private final UUIDRegistry registry;
-    private final BalanceRepository repository;
+@SuppressWarnings("UnstableApiUsage")
+public class Top {
+    private static final int ENTRY_PER_PAGE = 10;
+    private final Jecon plugin;
+    private final ConfigLoader config;
 
-    public Top(MessageConfig message, UUIDRegistry registry, BalanceRepository repository) {
-        this.message = message;
-        this.registry = registry;
-        this.repository = repository;
+    public Top(Jecon plugin, ConfigLoader config) {
+        this.plugin = plugin;
+        this.config = config;
     }
 
-    @Override
-    protected Result onCommand(CommandSender sender, Queue<String> args) {
-        final int page;
-        try {
-            page = args.isEmpty() ? 1 : Integer.parseInt(args.element());
-        } catch (NumberFormatException e) {
-            sender.sendMessage(message.invalidArgument.toString("value", args.element()));
-            return Result.ERROR;
-        }
+    public LiteralArgumentBuilder<CommandSourceStack> create() {
+        return Commands.literal("top")
+                .requires(s -> s.getSender().hasPermission("jecon.top"))
+                .executes(ctx -> execute(ctx, 1))
+                .then(Commands.argument("page", IntegerArgumentType.integer(1))
+                        .executes(ctx -> execute(ctx, IntegerArgumentType.getInteger(ctx, "page"))));
+    }
+
+    private int execute(CommandContext<CommandSourceStack> ctx, int page) {
+        CommandSender sender = ctx.getSource().getSender();
+        MessageConfig message = config.getMessageConfig();
+        BalanceRepository repository = plugin.getRepository();
+        UUIDRegistry registry = plugin.getRegistry();
 
         int offset = (page - 1) * ENTRY_PER_PAGE;
         Map<UUID, BigDecimal> top = repository.top(ENTRY_PER_PAGE, offset);
@@ -53,26 +59,6 @@ public class Top extends SubCommand {
                 sender.sendMessage(message.topEntry.toString(variable));
             }
         });
-        return Result.OK;
-    }
-
-    @Override
-    protected List<String> onTabComplete(CommandSender sender, Deque<String> args) {
-        return Collections.emptyList();
-    }
-
-    @Override
-    protected String requirePermission() {
-        return "jecon.top";
-    }
-
-    @Override
-    public CommandHelp getHelp() {
-        return new CommandHelp(
-            "/money top [page]",
-            message.help.top.toString(),
-            "/money top",
-            "/money top 1"
-        );
+        return Command.SINGLE_SUCCESS;
     }
 }

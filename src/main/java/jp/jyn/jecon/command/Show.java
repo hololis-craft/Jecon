@@ -1,80 +1,74 @@
 package jp.jyn.jecon.command;
 
-import jp.jyn.jbukkitlib.command.SubCommand;
+import com.mojang.brigadier.Command;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import io.papermc.paper.command.brigadier.CommandSourceStack;
+import io.papermc.paper.command.brigadier.Commands;
+import io.papermc.paper.command.brigadier.argument.ArgumentTypes;
+import io.papermc.paper.command.brigadier.argument.resolvers.selector.PlayerSelectorArgumentResolver;
 import jp.jyn.jbukkitlib.config.parser.template.variable.StringVariable;
-import jp.jyn.jbukkitlib.config.parser.template.variable.TemplateVariable;
-import jp.jyn.jbukkitlib.uuid.UUIDRegistry;
+import jp.jyn.jecon.Jecon;
+import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MessageConfig;
 import jp.jyn.jecon.repository.BalanceRepository;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 
-import java.util.Deque;
 import java.util.List;
-import java.util.Queue;
-import java.util.UUID;
 
-public class Show extends SubCommand {
-    private final MessageConfig message;
-    private final UUIDRegistry registry;
-    private final BalanceRepository repository;
+@SuppressWarnings("UnstableApiUsage")
+public class Show {
+    private final Jecon plugin;
+    private final ConfigLoader config;
 
-    public Show(MessageConfig message, UUIDRegistry registry, BalanceRepository repository) {
-        this.message = message;
-        this.registry = registry;
-        this.repository = repository;
+    public Show(Jecon plugin, ConfigLoader config) {
+        this.plugin = plugin;
+        this.config = config;
     }
 
-    @Override
-    protected Result onCommand(CommandSender sender, Queue<String> args) {
-        if (args.isEmpty() && sender instanceof Player) {
-            // self
-            if (!sender.hasPermission("jecon.show")) {
-                return Result.DONT_HAVE_PERMISSION;
-            }
+    public LiteralArgumentBuilder<CommandSourceStack> create() {
+        return Commands.literal("show")
+                .requires(s -> s.getSender().hasPermission("jecon.show"))
+                .executes(this::executeSelf)
+                .then(Commands.argument("player", ArgumentTypes.player())
+                        .requires(s -> s.getSender().hasPermission("jecon.show.other"))
+                        .executes(this::executeOther));
+    }
 
-            Player player = (Player) sender;
-            sender.sendMessage(format(player.getUniqueId(), StringVariable.init().put("name", player.getName())));
-            return Result.OK;
+    public int executeSelf(CommandContext<CommandSourceStack> ctx) {
+        Entity executor = ctx.getSource().getExecutor();
+        CommandSender sender = ctx.getSource().getSender();
+        if (!(executor instanceof Player player)) {
+            sender.sendPlainMessage(MessageConfig.PLAYER_ONLY);
+            return Command.SINGLE_SUCCESS;
         }
+        MessageConfig message = config.getMessageConfig();
+        BalanceRepository repository = plugin.getRepository();
+        sender.sendMessage(repository.format(player.getUniqueId())
+                .map(f -> message.show.toString(
+                        StringVariable.init().put("name", player.getName()).put("balance", f)))
+                .orElseGet(() -> message.accountNotFound.toString("name", player.getName())));
+        return Command.SINGLE_SUCCESS;
+    }
 
-        if (!sender.hasPermission("jecon.show.other")) {
-            return Result.DONT_HAVE_PERMISSION;
+    private int executeOther(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        PlayerSelectorArgumentResolver selector =
+                ctx.getArgument("player", PlayerSelectorArgumentResolver.class);
+        List<Player> targets = selector.resolve(ctx.getSource());
+        if (targets.isEmpty()) {
+            return Command.SINGLE_SUCCESS;
         }
-        if (args.isEmpty()) {
-            return Result.MISSING_ARGUMENT;
-        }
-
-        registry.getUUIDAsync(args.element()).thenAcceptSync(uuid -> {
-            StringVariable variable = StringVariable.init().put("name", args.element());
-            if (!uuid.isPresent()) {
-                sender.sendMessage(message.playerNotFound.toString(variable));
-                return;
-            }
-
-            sender.sendMessage(format(uuid.get(), variable));
-        });
-        return Result.OK;
-    }
-
-    @Override
-    protected List<String> onTabComplete(CommandSender sender, Deque<String> args) {
-        return CommandUtils.tabCompletePlayer(args);
-    }
-
-    private String format(UUID uuid, TemplateVariable variable) {
-        return repository.format(uuid)
-            .map(f -> message.show.toString(variable.put("balance", f)))
-            .orElseGet(() -> message.accountNotFound.toString(variable));
-    }
-
-    @Override
-    public CommandHelp getHelp() {
-        return new CommandHelp(
-            "/money show [player]",
-            message.help.show.toString(),
-            "/money show",
-            "/money show notch"
-        );
+        Player target = targets.getFirst();
+        MessageConfig message = config.getMessageConfig();
+        BalanceRepository repository = plugin.getRepository();
+        CommandSender sender = ctx.getSource().getSender();
+        sender.sendMessage(repository.format(target.getUniqueId())
+                .map(f -> message.show.toString(
+                        StringVariable.init().put("name", target.getName()).put("balance", f)))
+                .orElseGet(() -> message.accountNotFound.toString("name", target.getName())));
+        return Command.SINGLE_SUCCESS;
     }
 }

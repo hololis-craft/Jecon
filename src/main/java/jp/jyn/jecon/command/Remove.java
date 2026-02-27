@@ -1,72 +1,63 @@
 package jp.jyn.jecon.command;
 
-import jp.jyn.jbukkitlib.command.SubCommand;
+import com.mojang.brigadier.Command;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import io.papermc.paper.command.brigadier.CommandSourceStack;
+import io.papermc.paper.command.brigadier.Commands;
+import io.papermc.paper.command.brigadier.argument.ArgumentTypes;
+import io.papermc.paper.command.brigadier.argument.resolvers.selector.PlayerSelectorArgumentResolver;
 import jp.jyn.jbukkitlib.config.parser.template.variable.StringVariable;
-import jp.jyn.jbukkitlib.config.parser.template.variable.TemplateVariable;
-import jp.jyn.jbukkitlib.uuid.UUIDRegistry;
+import jp.jyn.jecon.Jecon;
+import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MessageConfig;
 import jp.jyn.jecon.repository.BalanceRepository;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
 
 import java.math.BigDecimal;
-import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
-import java.util.Queue;
 
-public class Remove extends SubCommand {
-    private final MessageConfig message;
-    private final UUIDRegistry registry;
-    private final BalanceRepository repository;
+@SuppressWarnings("UnstableApiUsage")
+public class Remove {
+    private final Jecon plugin;
+    private final ConfigLoader config;
 
-    public Remove(MessageConfig message, UUIDRegistry registry, BalanceRepository repository) {
-        this.message = message;
-        this.registry = registry;
-        this.repository = repository;
+    public Remove(Jecon plugin, ConfigLoader config) {
+        this.plugin = plugin;
+        this.config = config;
     }
 
-    @Override
-    protected Result onCommand(CommandSender sender, Queue<String> args) {
-        registry.getUUIDAsync(args.element()).thenAcceptSync(uuid -> {
-            TemplateVariable variable = StringVariable.init().put("name", args.element());
-            if (!uuid.isPresent()) {
-                sender.sendMessage(message.playerNotFound.toString(variable));
-                return;
-            }
-            Optional<BigDecimal> balance = repository.getDecimal(uuid.get());
-            if (!balance.isPresent()) {
-                sender.sendMessage(message.accountNotFound.toString(variable));
-                return;
-            }
-
-            repository.removeAccount(uuid.get());
-            sender.sendMessage(message.remove.toString(variable.put("balance", repository.format(balance.get()))));
-
-        });
-        return Result.OK;
+    public LiteralArgumentBuilder<CommandSourceStack> create() {
+        return Commands.literal("remove")
+                .requires(s -> s.getSender().hasPermission("jecon.remove"))
+                .then(Commands.argument("player", ArgumentTypes.player())
+                        .executes(this::execute));
     }
 
-    @Override
-    protected List<String> onTabComplete(CommandSender sender, Deque<String> args) {
-        return CommandUtils.tabCompletePlayer(args);
-    }
+    private int execute(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        PlayerSelectorArgumentResolver selector =
+                ctx.getArgument("player", PlayerSelectorArgumentResolver.class);
+        List<Player> targets = selector.resolve(ctx.getSource());
+        if (targets.isEmpty()) {
+            return Command.SINGLE_SUCCESS;
+        }
+        Player target = targets.getFirst();
+        CommandSender sender = ctx.getSource().getSender();
+        MessageConfig message = config.getMessageConfig();
+        BalanceRepository repository = plugin.getRepository();
 
-    @Override
-    protected int minimumArgs() {
-        return 1;
-    }
-
-    @Override
-    protected String requirePermission() {
-        return "jecon.remove";
-    }
-
-    @Override
-    public CommandHelp getHelp() {
-        return new CommandHelp(
-            "/money remove <player>",
-            message.help.remove.toString(),
-            "/money remove notch"
-        );
+        Optional<BigDecimal> balance = repository.getDecimal(target.getUniqueId());
+        if (balance.isEmpty()) {
+            sender.sendMessage(message.accountNotFound.toString("name", target.getName()));
+            return Command.SINGLE_SUCCESS;
+        }
+        repository.removeAccount(target.getUniqueId());
+        sender.sendMessage(message.remove.toString(StringVariable.init()
+                .put("name", target.getName())
+                .put("balance", repository.format(balance.get()))));
+        return Command.SINGLE_SUCCESS;
     }
 }

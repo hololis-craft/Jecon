@@ -1,47 +1,41 @@
 package jp.jyn.jecon.command;
 
-import jp.jyn.jbukkitlib.command.SubCommand;
+import com.mojang.brigadier.Command;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.context.CommandContext;
+import io.papermc.paper.command.brigadier.CommandSourceStack;
+import io.papermc.paper.command.brigadier.Commands;
 import jp.jyn.jbukkitlib.config.YamlLoader;
 import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MainConfig;
 import jp.jyn.jecon.db.Database;
-import jp.jyn.jecon.repository.BalanceRepository;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
 
-import java.util.Optional;
-import java.util.Queue;
+@SuppressWarnings("UnstableApiUsage")
+public class Convert {
+    private final Jecon plugin;
+    private final ConfigLoader config;
 
-public class Convert extends SubCommand {
-    private final ConfigLoader loader;
-    private final BalanceRepository repository;
-    private final Database oldDB;
-    private final MainConfig.DatabaseConfig old;
-    private final Runnable save;
-
-    public Convert(ConfigLoader loader, BalanceRepository repository, Database oldDB, Runnable save) {
-        this.loader = loader;
-        this.repository = repository;
-        this.oldDB = oldDB;
-        this.old = loader.getMainConfig().database;
-        this.save = save;
+    public Convert(Jecon plugin, ConfigLoader config) {
+        this.plugin = plugin;
+        this.config = config;
     }
 
-    @Override
-    protected Result onCommand(CommandSender sender, Queue<String> args) {
-        // 割と強引
-        YamlLoader config = new YamlLoader(Jecon.getInstance(), "config.yml");
-        if (Optional.ofNullable(args.poll()).map(a -> a.equalsIgnoreCase("confirm")).orElse(false)) {
-            convert(sender, config);
-        } else {
-            confirm(sender, config);
-        }
-        return Result.OK;
+    public LiteralArgumentBuilder<CommandSourceStack> create() {
+        return Commands.literal("convert")
+                .requires(s -> s.getSender().hasPermission("jecon.convert"))
+                .executes(this::executeConfirm)
+                .then(Commands.literal("confirm")
+                        .executes(this::executeConvert));
     }
 
-    private void confirm(CommandSender sender, YamlLoader config) {
-        ConfigurationSection db = config.getConfig().getConfigurationSection("database");
+    private int executeConfirm(CommandContext<CommandSourceStack> ctx) {
+        CommandSender sender = ctx.getSource().getSender();
+        YamlLoader yamlConfig = new YamlLoader(plugin, "config.yml");
+        MainConfig.DatabaseConfig old = config.getMainConfig().database;
+        ConfigurationSection db = yamlConfig.getConfig().getConfigurationSection("database");
 
         if (old.url.startsWith("jdbc:sqlite:")) {
             sender.sendMessage("Convert from SQLite to MySQL");
@@ -56,7 +50,7 @@ public class Convert extends SubCommand {
             sender.sendMessage("File: " + db.getString("sqlite.file"));
         } else {
             sender.sendMessage("Unsupported Database");
-            return;
+            return Command.SINGLE_SUCCESS;
         }
 
         sender.sendMessage("");
@@ -65,41 +59,42 @@ public class Convert extends SubCommand {
         sender.sendMessage("");
         sender.sendMessage("If there is no problem, please execute '/money convert confirm'.");
         sender.sendMessage("If you need to change the settings, edit config.yml.");
+        return Command.SINGLE_SUCCESS;
     }
 
-    private void convert(CommandSender sender, YamlLoader config) {
+    private int executeConvert(CommandContext<CommandSourceStack> ctx) {
+        CommandSender sender = ctx.getSource().getSender();
+        YamlLoader yamlConfig = new YamlLoader(plugin, "config.yml");
+        MainConfig.DatabaseConfig old = config.getMainConfig().database;
+        Database oldDB = plugin.getDb();
+
         if (old.url.startsWith("jdbc:sqlite:")) {
-            config.getConfig().set("database.type", "mysql");
+            yamlConfig.getConfig().set("database.type", "mysql");
         } else if (old.url.startsWith("jdbc:mysql:")) {
-            config.getConfig().set("database.type", "sqlite");
+            yamlConfig.getConfig().set("database.type", "sqlite");
         } else {
             sender.sendMessage("Unsupported Database");
-            return;
+            return Command.SINGLE_SUCCESS;
         }
-        config.saveConfig();
+        yamlConfig.saveConfig();
         sender.sendMessage("Config reloading.");
-        loader.reloadConfig();
+        config.reloadConfig();
 
         sender.sendMessage("Connect to database.");
-        Database db = Database.connect(loader.getMainConfig().database);
+        Database db = Database.connect(config.getMainConfig().database);
 
         sender.sendMessage("Saving unsaved data.");
-        save.run();
+        plugin.getSaveAll().run();
 
         sender.sendMessage("Converting...");
         db.convert(oldDB);
         sender.sendMessage("Converted.");
 
         sender.sendMessage("Reloading...");
-        Jecon jecon = Jecon.getInstance();
-        jecon.onDisable();
+        plugin.onDisable();
         db.close();
-        jecon.onEnable();
+        plugin.onEnable();
         sender.sendMessage("Successfully completed.");
-    }
-
-    @Override
-    protected String requirePermission() {
-        return "jecon.convert";
+        return Command.SINGLE_SUCCESS;
     }
 }

@@ -1,11 +1,14 @@
 package jp.jyn.jecon;
 
-import jp.jyn.jbukkitlib.command.SubExecutor;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.tree.LiteralCommandNode;
+import io.papermc.paper.command.brigadier.CommandSourceStack;
+import io.papermc.paper.command.brigadier.Commands;
+import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import jp.jyn.jbukkitlib.uuid.UUIDRegistry;
 import jp.jyn.jecon.command.Convert;
 import jp.jyn.jecon.command.Create;
 import jp.jyn.jecon.command.Give;
-import jp.jyn.jecon.command.Help;
 import jp.jyn.jecon.command.Pay;
 import jp.jyn.jecon.command.Reload;
 import jp.jyn.jecon.command.Remove;
@@ -16,14 +19,12 @@ import jp.jyn.jecon.command.Top;
 import jp.jyn.jecon.command.Version;
 import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MainConfig;
-import jp.jyn.jecon.config.MessageConfig;
 import jp.jyn.jecon.db.Database;
 import jp.jyn.jecon.repository.BalanceRepository;
 import jp.jyn.jecon.repository.LazyRepository;
 import jp.jyn.jecon.repository.SyncRepository;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Bukkit;
-import org.bukkit.command.PluginCommand;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
@@ -35,9 +36,11 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 
+@SuppressWarnings("UnstableApiUsage")
 public class Jecon extends JavaPlugin {
     private static Jecon instance = null;
 
@@ -45,8 +48,17 @@ public class Jecon extends JavaPlugin {
     private BalanceRepository repository;
     private VaultEconomy economy;
 
+    // Fields elevated for cross-reload access
+    private UUIDRegistry registry;
+    private Database db;
+    private VersionChecker checker;
+    private Runnable saveAll;
+
     // Stack(LIFO)
     private final Deque<Runnable> destructor = new ArrayDeque<>();
+
+    // Brigadier commands are registered only once via LifecycleEvents.COMMANDS
+    private boolean commandsRegistered = false;
 
     @Override
     public void onEnable() {
@@ -58,25 +70,26 @@ public class Jecon extends JavaPlugin {
         }
         config.reloadConfig();
         MainConfig main = config.getMainConfig();
-        MessageConfig message = config.getMessageConfig();
 
-        UUIDRegistry registry = UUIDRegistry.getSharedCacheRegistry(this);
+        if (registry == null) {
+            registry = UUIDRegistry.getSharedCacheRegistry(this);
+        }
+        if (checker == null) {
+            checker = new VersionChecker(main.versionCheck, config.getMessageConfig());
+        }
 
-        VersionChecker checker = new VersionChecker(main.versionCheck, message);
         BukkitTask task = getServer().getScheduler().runTaskLater(
-            this,
-            () -> checker.check(Bukkit.getConsoleSender()), 20 * 30
-        );
+                this,
+                () -> checker.check(Bukkit.getConsoleSender()), 20 * 30);
         destructor.addFirst(task::cancel);
 
         // connect db
-        Database db = Database.connect(main.database);
+        db = Database.connect(main.database);
         destructor.addFirst(db::close);
 
-        // methods for internal use.
+        // methods for internal use
         Consumer<UUID> consistency;
         Consumer<UUID> save;
-        Runnable saveAll;
         // init repository
         if (main.lazyWrite) {
             LazyRepository lazy = new LazyRepository(main, db);
@@ -88,9 +101,12 @@ public class Jecon extends JavaPlugin {
         } else {
             repository = new SyncRepository(main, db);
 
-            consistency = u -> {};
-            save = u -> {};
-            saveAll = () -> {};
+            consistency = u -> {
+            };
+            save = u -> {
+            };
+            saveAll = () -> {
+            };
         }
         destructor.addFirst(() -> {
             saveAll.run();
@@ -102,9 +118,9 @@ public class Jecon extends JavaPlugin {
             Plugin vault = getServer().getPluginManager().getPlugin("Vault");
             if (vault != null) {
                 if (vault.isEnabled()) {
-                    vaultHook(registry);
+                    vaultHook();
                 } else {
-                    getServer().getPluginManager().registerEvents(new VaultRegister(registry), this);
+                    getServer().getPluginManager().registerEvents(new VaultRegister(), this);
                 }
             }
         } else {
@@ -113,36 +129,49 @@ public class Jecon extends JavaPlugin {
 
         // register events
         getServer().getPluginManager().registerEvents(
-            new EventListener(main, checker, repository, consistency, save), this
-        );
+                new EventListener(main, checker, repository, consistency, save), this);
         destructor.addFirst(() -> HandlerList.unregisterAll(this));
 
-        // register commands
-        SubExecutor.Builder builder = SubExecutor.Builder.init()
-            .setDefaultCommand("show")
-            .putCommand("show", new Show(message, registry, repository))
-            .putCommand("pay", new Pay(message, registry, repository))
-            .putCommand("set", new Set(message, registry, repository))
-            .putCommand("give", new Give(message, registry, repository))
-            .putCommand("take", new Take(message, registry, repository))
-            .putCommand("create", new Create(main, message, registry, repository))
-            .putCommand("remove", new Remove(message, registry, repository))
-            .putCommand("top", new Top(message, registry, repository))
-            .putCommand("convert", new Convert(config, repository, db, saveAll))
-            .putCommand("reload", new Reload(message))
-            .putCommand("version", new Version(message, checker));
-        Help help = new Help(message, builder.getSubCommands());
-        builder.setErrorExecutor(help).putCommand("help", help);
-
-        PluginCommand cmd = getCommand("jecon");
-        SubExecutor subExecutor = builder.register(cmd);
-        destructor.addFirst(() -> {
-            cmd.setTabCompleter(this);
-            cmd.setExecutor(this);
-        });
+        // register commands via Brigadier (only once per plugin lifecycle)
+        if (!commandsRegistered) {
+            commandsRegistered = true;
+            this.getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> {
+                LiteralCommandNode<CommandSourceStack> node = buildCommandTree().build();
+                event.registrar().register(node, "Jecon economy plugin", List.of("money"));
+            });
+        }
     }
 
-    private void vaultHook(UUIDRegistry registry) {
+    private LiteralArgumentBuilder<CommandSourceStack> buildCommandTree() {
+        Show show = new Show(this, config);
+        Pay pay = new Pay(this, config);
+        Set set = new Set(this, config);
+        Give give = new Give(this, config);
+        Take take = new Take(this, config);
+        Create create = new Create(this, config);
+        Remove remove = new Remove(this, config);
+        Top top = new Top(this, config);
+        Convert convert = new Convert(this, config);
+        Reload reload = new Reload(this, config);
+        Version version = new Version(this, config);
+
+        return Commands.literal("jecon")
+                .requires(s -> s.getSender().hasPermission("jecon.show"))
+                .executes(show::executeSelf)
+                .then(show.create())
+                .then(pay.create())
+                .then(set.create())
+                .then(give.create())
+                .then(take.create())
+                .then(create.create())
+                .then(remove.create())
+                .then(top.create())
+                .then(convert.create())
+                .then(reload.create())
+                .then(version.create());
+    }
+
+    private void vaultHook() {
         if (economy != null) {
             return;
         }
@@ -177,19 +206,33 @@ public class Jecon extends JavaPlugin {
         return repository;
     }
 
-    private static class VaultRegister implements Listener {
-        private final UUIDRegistry registry;
+    public UUIDRegistry getRegistry() {
+        return registry;
+    }
 
-        private VaultRegister(UUIDRegistry registry) {
-            this.registry = registry;
-        }
+    public Database getDb() {
+        return db;
+    }
 
+    public VersionChecker getChecker() {
+        return checker;
+    }
+
+    public Runnable getSaveAll() {
+        return saveAll;
+    }
+
+    public ConfigLoader getConfigLoader() {
+        return config;
+    }
+
+    private class VaultRegister implements Listener {
         @EventHandler(ignoreCancelled = true)
         public void onPluginEnable(PluginEnableEvent e) {
             if (!e.getPlugin().getName().equals("Vault")) {
                 return;
             }
-            Jecon.getInstance().vaultHook(registry);
+            vaultHook();
             PluginEnableEvent.getHandlerList().unregister(this);
         }
     }

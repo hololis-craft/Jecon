@@ -1,46 +1,43 @@
 package jp.jyn.jecon.command;
 
-import jp.jyn.jbukkitlib.command.SubCommand;
+import com.mojang.brigadier.Command;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.context.CommandContext;
+import io.papermc.paper.command.brigadier.CommandSourceStack;
+import io.papermc.paper.command.brigadier.Commands;
+import io.papermc.paper.plugin.configuration.PluginMeta;
 import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.VersionChecker;
+import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MessageConfig;
 import org.bukkit.command.CommandSender;
-import org.bukkit.plugin.PluginDescriptionFile;
 
-import java.util.Queue;
+@SuppressWarnings("UnstableApiUsage")
+public class Version {
+    private final Jecon plugin;
+    private final ConfigLoader config;
 
-public class Version extends SubCommand {
-    private final MessageConfig message;
-    private final VersionChecker checker;
-    private final PluginDescriptionFile description;
-
-    public Version(MessageConfig message, VersionChecker checker) {
-        this.message = message;
-        this.checker = checker;
-        this.description = Jecon.getInstance().getDescription();
+    public Version(Jecon plugin, ConfigLoader config) {
+        this.plugin = plugin;
+        this.config = config;
     }
 
-    @Override
-    protected Result onCommand(CommandSender sender, Queue<String> args) {
+    public LiteralArgumentBuilder<CommandSourceStack> create() {
+        return Commands.literal("version")
+                .requires(s -> s.getSender().hasPermission("jecon.version"))
+                .executes(this::execute);
+    }
+
+    private int execute(CommandContext<CommandSourceStack> ctx) {
+        CommandSender sender = ctx.getSource().getSender();
+        PluginMeta meta = plugin.getPluginMeta();
+        VersionChecker checker = plugin.getChecker();
         sender.sendMessage(MessageConfig.HEADER);
-        sender.sendMessage(description.getName() + " - " + description.getVersion());
-        sender.sendMessage(description.getDescription());
-        sender.sendMessage("Developer: " + String.join(",", description.getAuthors()));
-        sender.sendMessage("SourceCode: " + description.getWebsite());
+        sender.sendMessage(meta.getName() + " - " + meta.getVersion());
+        sender.sendMessage(meta.getDescription() != null ? meta.getDescription() : "");
+        sender.sendMessage("Developer: " + String.join(",", meta.getAuthors()));
+        sender.sendMessage("SourceCode: " + (meta.getWebsite() != null ? meta.getWebsite() : ""));
         checker.check(sender);
-        return Result.OK;
-    }
-
-    @Override
-    protected String requirePermission() {
-        return "jecon.version";
-    }
-
-    @Override
-    public CommandHelp getHelp() {
-        return new CommandHelp(
-            "/money version",
-            message.help.version.toString()
-        );
+        return Command.SINGLE_SUCCESS;
     }
 }

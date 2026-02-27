@@ -1,76 +1,64 @@
 package jp.jyn.jecon.command;
 
-import jp.jyn.jbukkitlib.command.SubCommand;
+import com.mojang.brigadier.Command;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import io.papermc.paper.command.brigadier.CommandSourceStack;
+import io.papermc.paper.command.brigadier.Commands;
+import io.papermc.paper.command.brigadier.argument.ArgumentTypes;
+import io.papermc.paper.command.brigadier.argument.resolvers.selector.PlayerSelectorArgumentResolver;
 import jp.jyn.jbukkitlib.config.parser.template.variable.StringVariable;
-import jp.jyn.jbukkitlib.config.parser.template.variable.TemplateVariable;
-import jp.jyn.jbukkitlib.uuid.UUIDRegistry;
-import jp.jyn.jecon.repository.BalanceRepository;
+import jp.jyn.jecon.Jecon;
+import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MessageConfig;
+import jp.jyn.jecon.repository.BalanceRepository;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
 
 import java.math.BigDecimal;
-import java.util.Deque;
 import java.util.List;
-import java.util.Queue;
 
-public class Give extends SubCommand {
-    private final MessageConfig message;
-    private final UUIDRegistry registry;
-    private final BalanceRepository repository;
+@SuppressWarnings("UnstableApiUsage")
+public class Give {
+    private final Jecon plugin;
+    private final ConfigLoader config;
 
-    public Give(MessageConfig message, UUIDRegistry registry, BalanceRepository repository) {
-        this.message = message;
-        this.registry = registry;
-        this.repository = repository;
+    public Give(Jecon plugin, ConfigLoader config) {
+        this.plugin = plugin;
+        this.config = config;
     }
 
-    @SuppressWarnings("Duplicates")
-    @Override
-    protected Result onCommand(CommandSender sender, Queue<String> args) {
-        String to = args.remove();
-        BigDecimal amount = CommandUtils.parseDecimal(args.element());
-        if (amount == null) {
-            sender.sendMessage(message.invalidArgument.toString("value", args.element()));
-            return Result.OK;
+    public LiteralArgumentBuilder<CommandSourceStack> create() {
+        return Commands.literal("give")
+                .requires(s -> s.getSender().hasPermission("jecon.give"))
+                .then(Commands.argument("player", ArgumentTypes.player())
+                        .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0))
+                                .executes(this::execute)));
+    }
+
+    private int execute(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        PlayerSelectorArgumentResolver selector =
+                ctx.getArgument("player", PlayerSelectorArgumentResolver.class);
+        List<Player> targets = selector.resolve(ctx.getSource());
+        if (targets.isEmpty()) {
+            return Command.SINGLE_SUCCESS;
         }
+        Player target = targets.getFirst();
+        BigDecimal amount = BigDecimal.valueOf(DoubleArgumentType.getDouble(ctx, "amount"));
+        CommandSender sender = ctx.getSource().getSender();
+        MessageConfig message = config.getMessageConfig();
+        BalanceRepository repository = plugin.getRepository();
 
-        registry.getUUIDAsync(to).thenAcceptSync(uuid -> {
-            TemplateVariable variable = StringVariable.init().put("name", to);
-            if (!uuid.isPresent()) {
-                sender.sendMessage(message.playerNotFound.toString(variable));
-                return;
-            }
-            if (!repository.hasAccount(uuid.get())) {
-                sender.sendMessage(message.accountNotFound.toString(variable));
-                return;
-            }
-            repository.deposit(uuid.get(), amount);
-            sender.sendMessage(message.give.toString(variable.put("amount", repository.format(amount))));
-        });
-        return Result.OK;
-    }
-
-    @Override
-    protected List<String> onTabComplete(CommandSender sender, Deque<String> args) {
-        return CommandUtils.tabCompletePlayer(args);
-    }
-
-    @Override
-    protected String requirePermission() {
-        return "jecon.give";
-    }
-
-    @Override
-    protected int minimumArgs() {
-        return 2;
-    }
-
-    @Override
-    public CommandHelp getHelp() {
-        return new CommandHelp(
-            "/money give <player> <amount>",
-            message.help.give.toString(),
-            "/money give notch 100"
-        );
+        if (!repository.hasAccount(target.getUniqueId())) {
+            sender.sendMessage(message.accountNotFound.toString("name", target.getName()));
+            return Command.SINGLE_SUCCESS;
+        }
+        repository.deposit(target.getUniqueId(), amount);
+        sender.sendMessage(message.give.toString(StringVariable.init()
+                .put("name", target.getName())
+                .put("amount", repository.format(amount))));
+        return Command.SINGLE_SUCCESS;
     }
 }
