@@ -1,12 +1,12 @@
 main: "jp.jyn.jecon.Jecon"
 name: "Jecon"
-version: "${project.version}"
-website: "${project.url}"
+version: "${version}"
+website: "${url}"
 author: "HimaJyun( https://jyn.jp/ )"
-description: "${project.description}"
+description: "${description}"
 load: "STARTUP"
 loadbefore: ["Vault"]
-api-version: "1.15"
+api-version: "1.21"
 
 commands:
   jecon:

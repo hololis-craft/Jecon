@@ -5,19 +5,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build Commands
 
 ```bash
-# Build the plugin JAR (default, uses shade plugin to bundle dependencies)
-mvn package
+# プラグイン JAR をビルド (Shadow プラグインで依存をバンドル)
+./gradlew shadowJar
 
-# Build the library version (for publishing as API dependency)
-mvn -P lib clean javadoc:jar source:jar deploy
+# ライブラリ版をビルド (API 依存として配布用)
+./gradlew libJar javadocJar sourcesJar
 
-# Clean build artifacts
-mvn clean
+# ローカルリポジトリへパブリッシュ
+./gradlew publishLibPublicationToLocalRepoRepository
+
+# ビルド成果物を削除
+./gradlew clean
 ```
 
-The default Maven profile (`plugin`) produces a shaded JAR at `target/Jecon-<version>.jar` with bundled dependencies (JBukkitLib, HikariCP, SLF4J) relocated to `jp.jyn.jecon.lib.*`.
+デフォルトビルドは `build/libs/Jecon-<version>.jar` を生成し、
+依存ライブラリ (JBukkitLib, HikariCP, SLF4J) を `jp.jyn.jecon.lib.*` に
+リロケートしてバンドルする。
 
-There are no unit tests in this codebase — testing is done by deploying the JAR to a Spigot server.
+テストは存在しない — Spigot/Paper サーバーに JAR をデプロイして動作確認する。
 
 ## Architecture Overview
 
