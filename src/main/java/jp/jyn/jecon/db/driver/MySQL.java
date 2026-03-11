@@ -23,7 +23,9 @@ public class MySQL extends Database {
             statement.executeUpdate(
                 "CREATE TABLE IF NOT EXISTS `account` (" +
                     "`id`   INT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT," +
-                    "`uuid` BINARY(16)    NOT NULL UNIQUE KEY" +
+                    "`uuid` BINARY(16)   NOT NULL UNIQUE KEY," +
+                    "`name` VARCHAR(16)  NULL," +
+                    "INDEX `account_name_index` (`name`)" +
                     ")"
             );
             statement.executeUpdate(
@@ -59,11 +61,15 @@ public class MySQL extends Database {
 
         if (version.equals("1")) {
             v1to2(v1prefix());
-        } else {
-            logger.severe(DBMigrationUtils.MIGRATION_ERROR_1);
-            logger.severe(DBMigrationUtils.MIGRATION_ERROR_2);
-            throw new IllegalStateException(String.format(DBMigrationUtils.MIGRATION_EXCEPTION, version));
+            version = DBMigrationUtils.getVersion(hikari);
         }
+        if (version.equals("2")) {
+            v2to3();
+            return;
+        }
+        logger.severe(DBMigrationUtils.MIGRATION_ERROR_1);
+        logger.severe(DBMigrationUtils.MIGRATION_ERROR_2);
+        throw new IllegalStateException(String.format(DBMigrationUtils.MIGRATION_EXCEPTION, version));
     }
 
     private String v1prefix() {
@@ -111,6 +117,17 @@ public class MySQL extends Database {
             // update version
             statement.executeUpdate("DROP TABLE `meta`");
             DBMigrationUtils.getVersion(hikari);
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void v2to3() {
+        try (Connection connection = hikari.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.executeUpdate("ALTER TABLE `account` ADD COLUMN `name` VARCHAR(16) NULL");
+            statement.executeUpdate("CREATE INDEX `account_name_index` ON `account` (`name`)");
+            statement.executeUpdate("UPDATE `meta` SET `value`='3' WHERE `key`='dbversion'");
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }

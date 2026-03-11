@@ -22,8 +22,12 @@ public class SQLite extends Database {
             statement.executeUpdate(
                 "CREATE TABLE IF NOT EXISTS `account` (" +
                     "`id`   INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT," +
-                    "`uuid` BLOB    NOT NULL UNIQUE " +
+                    "`uuid` BLOB    NOT NULL UNIQUE," +
+                    "`name` TEXT" +
                     ")"
+            );
+            statement.executeUpdate(
+                "CREATE INDEX IF NOT EXISTS `account_name_index` ON `account` (`name`)"
             );
             statement.executeUpdate(
                 "CREATE TABLE IF NOT EXISTS `balance` (" +
@@ -58,11 +62,15 @@ public class SQLite extends Database {
 
         if ("1".equals(version)) {
             v1to2();
-        } else {
-            logger.severe(DBMigrationUtils.MIGRATION_ERROR_1);
-            logger.severe(DBMigrationUtils.MIGRATION_ERROR_2);
-            throw new IllegalStateException(String.format(DBMigrationUtils.MIGRATION_EXCEPTION, version));
+            version = DBMigrationUtils.getVersion(hikari);
         }
+        if ("2".equals(version)) {
+            v2to3();
+            return;
+        }
+        logger.severe(DBMigrationUtils.MIGRATION_ERROR_1);
+        logger.severe(DBMigrationUtils.MIGRATION_ERROR_2);
+        throw new IllegalStateException(String.format(DBMigrationUtils.MIGRATION_EXCEPTION, version));
     }
 
     private void v1to2() {
@@ -80,6 +88,17 @@ public class SQLite extends Database {
             // update version
             statement.executeUpdate("DROP TABLE `meta`");
             DBMigrationUtils.getVersion(hikari);
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void v2to3() {
+        try (Connection connection = hikari.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.executeUpdate("ALTER TABLE `account` ADD COLUMN `name` TEXT");
+            statement.executeUpdate("CREATE INDEX IF NOT EXISTS `account_name_index` ON `account` (`name`)");
+            statement.executeUpdate("UPDATE `meta` SET `value`='3' WHERE `key`='dbversion'");
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }

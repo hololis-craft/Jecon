@@ -14,6 +14,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -21,6 +23,8 @@ import java.util.UUID;
 import java.util.logging.Logger;
 
 public abstract class Database {
+    public record TopEntry(int id, long balance, String name) {}
+
     public static final int LOG_DEPOSIT  = 1;
     public static final int LOG_WITHDRAW = 2;
     public static final int LOG_SET      = 3;
@@ -149,6 +153,72 @@ public abstract class Database {
         return Optional.empty();
     }
 
+    public Optional<String> getCachedName(UUID uuid) {
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT `name` FROM `account` WHERE `uuid`=?"
+             )) {
+            statement.setBytes(1, UUIDBytes.toBytes(uuid));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return Optional.ofNullable(resultSet.getString(1));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+        return Optional.empty();
+    }
+
+    public void cachePlayerName(UUID uuid, String name) {
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "UPDATE `account` SET `name`=? WHERE `uuid`=?"
+             )) {
+            statement.setString(1, name);
+            statement.setBytes(2, UUIDBytes.toBytes(uuid));
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public Optional<UUID> findUuidByExactCachedName(String name) {
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT `uuid` FROM `account` WHERE `name`=?"
+             )) {
+            statement.setString(1, name);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return Optional.of(UUIDBytes.fromBytes(resultSet.getBytes(1)));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+        return Optional.empty();
+    }
+
+    public List<String> suggestCachedNames(String prefix, int limit) {
+        List<String> result = new ArrayList<>();
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT `name` FROM `account` WHERE `name` IS NOT NULL AND `name` LIKE ? ORDER BY `name` ASC LIMIT ?"
+             )) {
+            statement.setString(1, prefix + "%");
+            statement.setInt(2, limit);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    result.add(resultSet.getString(1));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+        return result;
+    }
+
     public OptionalLong getBalance(int id) {
         try (Connection connection = hikari.getConnection();
              PreparedStatement statement = connection.prepareStatement(
@@ -248,6 +318,31 @@ public abstract class Database {
             try (ResultSet resultSet = statement.executeQuery()) {
                 while (resultSet.next()) {
                     result.put(resultSet.getInt("id"), resultSet.getLong("balance"));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+        return result;
+    }
+
+    public List<TopEntry> topWithNames(int limit, int offset) {
+        List<TopEntry> result = new ArrayList<>();
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT `balance`.`id`,`balance`.`balance`,`account`.`name` " +
+                     "FROM `balance` LEFT JOIN `account` ON `balance`.`id`=`account`.`id` " +
+                     "ORDER BY `balance`.`balance` DESC LIMIT ? OFFSET ?"
+             )) {
+            statement.setInt(1, limit);
+            statement.setInt(2, offset);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    result.add(new TopEntry(
+                        resultSet.getInt("id"),
+                        resultSet.getLong("balance"),
+                        resultSet.getString("name")
+                    ));
                 }
             }
         } catch (SQLException e) {

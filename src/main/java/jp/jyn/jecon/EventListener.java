@@ -16,6 +16,7 @@ import java.util.function.Consumer;
 @SuppressWarnings("unused")
 @PackagePrivate
 class EventListener implements Listener {
+    private final Jecon plugin;
     private final boolean createAccountOnJoin;
     private final BigDecimal defaultBalance;
 
@@ -26,8 +27,9 @@ class EventListener implements Listener {
     private final Consumer<UUID> save;
 
     @PackagePrivate
-    EventListener(MainConfig config, VersionChecker checker, BalanceRepository repository,
+    EventListener(Jecon plugin, MainConfig config, VersionChecker checker, BalanceRepository repository,
                   Consumer<UUID> consistency, Consumer<UUID> save) {
+        this.plugin = plugin;
         this.createAccountOnJoin = config.createAccountOnJoin;
         this.defaultBalance = config.defaultBalance;
 
@@ -43,6 +45,9 @@ class EventListener implements Listener {
         if (player.hasPermission("jecon.version")) {
             checker.check(player);
         }
+
+        plugin.getDb().getId(player.getUniqueId());
+        plugin.getDb().cachePlayerName(player.getUniqueId(), player.getName());
 
         // ログイン時に一貫性チェック
         consistency.accept(player.getUniqueId());

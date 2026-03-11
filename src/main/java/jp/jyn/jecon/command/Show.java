@@ -3,11 +3,8 @@ package jp.jyn.jecon.command;
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
-import io.papermc.paper.command.brigadier.argument.ArgumentTypes;
-import io.papermc.paper.command.brigadier.argument.resolvers.selector.PlayerSelectorArgumentResolver;
 import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MessageConfig;
@@ -16,8 +13,6 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
-
-import java.util.List;
 
 @SuppressWarnings("UnstableApiUsage")
 public class Show {
@@ -33,7 +28,7 @@ public class Show {
         return Commands.literal("show")
                 .requires(s -> s.getSender().hasPermission("jecon.show"))
                 .executes(this::executeSelf)
-                .then(Commands.argument("player", ArgumentTypes.player())
+                .then(CachedPlayerArgument.player(plugin)
                         .requires(s -> s.getSender().hasPermission("jecon.show.other"))
                         .executes(this::executeOther));
     }
@@ -55,22 +50,20 @@ public class Show {
         return Command.SINGLE_SUCCESS;
     }
 
-    private int executeOther(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
-        PlayerSelectorArgumentResolver selector =
-                ctx.getArgument("player", PlayerSelectorArgumentResolver.class);
-        List<Player> targets = selector.resolve(ctx.getSource());
-        if (targets.isEmpty()) {
-            return Command.SINGLE_SUCCESS;
+    private int executeOther(CommandContext<CommandSourceStack> ctx) {
+        CachedPlayerArgument.Target target = CachedPlayerArgument.resolve(ctx)
+                .orElse(null);
+        if (target == null) {
+            return CachedPlayerArgument.notFound(ctx, config.getMessageConfig());
         }
-        Player target = targets.getFirst();
         MessageConfig message = config.getMessageConfig();
         BalanceRepository repository = plugin.getRepository();
         CommandSender sender = ctx.getSource().getSender();
-        sender.sendMessage(repository.format(target.getUniqueId())
+        sender.sendMessage(repository.format(target.uuid())
                 .map(f -> message.show.toComponent(
-                        Placeholder.unparsed("name", target.getName()),
+                        Placeholder.unparsed("name", target.name()),
                         Placeholder.unparsed("balance", f)))
-                .orElseGet(() -> message.accountNotFound.toComponent("name", target.getName())));
+                .orElseGet(() -> message.accountNotFound.toComponent("name", target.name())));
         return Command.SINGLE_SUCCESS;
     }
 }

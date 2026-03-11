@@ -13,7 +13,7 @@ import java.util.UUID;
 public class DBMigrationUtils {
     private DBMigrationUtils() {}
 
-    public final static String CURRENT_VERSION = "2";
+    public final static String CURRENT_VERSION = "3";
     public final static String MIGRATION_ERROR_1 = "Unable to automatically migrate the database.";
     public final static String MIGRATION_ERROR_2 = "Check the document and check that the updating procedure is correct.";
     public final static String MIGRATION_EXCEPTION = "Unknown version(%s)";

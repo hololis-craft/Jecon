@@ -129,7 +129,7 @@ public class Jecon extends JavaPlugin {
 
         // register events
         getServer().getPluginManager().registerEvents(
-                new EventListener(main, checker, repository, consistency, save), this);
+                new EventListener(this, main, checker, repository, consistency, save), this);
         destructor.addFirst(() -> HandlerList.unregisterAll(this));
 
         // register commands via Brigadier (only once per plugin lifecycle)
