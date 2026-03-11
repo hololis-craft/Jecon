@@ -1,28 +1,28 @@
-doNotHavePermission: "&cYou don't have permission!!"
-missingArgument: "&cArgument is missing."
-invalidArgument: "&cInvalid argument&r: {value}"
-playerNotFound: "&cPlayer not found&r: {name}"
+doNotHavePermission: "<red>You don't have permission!!"
+missingArgument: "<red>Argument is missing."
+invalidArgument: "<red>Invalid argument<reset>: <value>"
+playerNotFound: "<red>Player not found<reset>: <name>"
 
-accountNotFound: "&cAccount not found&r: {name}"
-notEnough: "&cThe balance of the account is not enough."
+accountNotFound: "<red>Account not found<reset>: <name>"
+notEnough: "<red>The balance of the account is not enough."
 
-show: "{name} balance: {balance}"
-paySuccess: "&aSent a {amount} to {name}."
-payReceive: "&aReceived a {amount} from {name}."
-set: "&aBalance of {name} was set to {balance}."
-give: "&aGave {amount} to {name}."
-take: "&aTook {amount} from {name}."
-create: "&aHas been created account of {name} (Balance: {balance})."
-createAlready: "&cAccount already exists: {name}"
-remove: "&aHas been deleted account of {name} (Balance: {balance})"
+show: "<name> balance: <balance>"
+paySuccess: "<green>Sent a <amount> to <name>."
+payReceive: "<green>Received a <amount> from <name>."
+set: "<green>Balance of <name> was set to <balance>."
+give: "<green>Gave <amount> to <name>."
+take: "<green>Took <amount> from <name>."
+create: "<green>Has been created account of <name> (Balance: <balance>)."
+createAlready: "<red>Account already exists: <name>"
+remove: "<green>Has been deleted account of <name> (Balance: <balance>)"
 reloaded: "Config has been reloaded."
 
-topFirst: "&a======&r Billionaires ranking (Page: {page}) &a======"
-topEntry: "{rank}: {name} ({balance})"
+topFirst: "<green>======<reset> Billionaires ranking (Page: <page>) <green>======"
+topEntry: "<rank>: <name> (<balance>)"
 
 newVersion:
-    - "New version available: {old} -> {new}"
-    - "Download: {url}"
+    - "New version available: <old> -> <new>"
+    - "Download: <url>"
 
 help:
     show: "Show money."
@@ -39,31 +39,30 @@ help:
     example: "Example:"
 
 # //*<!-- syntax -->*/
-# &0->Black(#000000)
-# &1->Dark Blue(#0000AA)
-# &2->Dark Green(#00AA00)
-# &3->Dark Aqua(#00AAAA)
-# &4->Dark Red(#AA0000)
-# &5->Purple(#AA00AA)
-# &6->Gold(#FFAA00)
-# &7->Gray(#AAAAAA)
-# &8->Dark Gray(#555555)
-# &9->Blue(#5555FF)
-# &a->Green(#55FF55)
-# &b->Aqua(#55FFFF)
-# &c->Red(#FF5555)
-# &d->Light Purple(#FF55FF)
-# &e->Yellow(#FFFF55)
-# &f->White(#FFFFFF)
-# &k->Obfuscated
-# &l->Bold
-# &m->Strikethrough
-# &n->Underline
-# &o->Italic
-# &r->Reset
-# &&->&
-# {variable}->variable
-# &{variable&}->{variable}
+# MiniMessage format: https://docs.advntr.dev/minimessage/format.html
+# <black>       -> Black (#000000)
+# <dark_blue>   -> Dark Blue (#0000AA)
+# <dark_green>  -> Dark Green (#00AA00)
+# <dark_aqua>   -> Dark Aqua (#00AAAA)
+# <dark_red>    -> Dark Red (#AA0000)
+# <dark_purple> -> Purple (#AA00AA)
+# <gold>        -> Gold (#FFAA00)
+# <gray>        -> Gray (#AAAAAA)
+# <dark_gray>   -> Dark Gray (#555555)
+# <blue>        -> Blue (#5555FF)
+# <green>       -> Green (#55FF55)
+# <aqua>        -> Aqua (#55FFFF)
+# <red>         -> Red (#FF5555)
+# <light_purple>-> Light Purple (#FF55FF)
+# <yellow>      -> Yellow (#FFFF55)
+# <white>       -> White (#FFFFFF)
+# <bold>        -> Bold
+# <italic>      -> Italic
+# <underlined>  -> Underline
+# <strikethrough> -> Strikethrough
+# <obfuscated>  -> Obfuscated
+# <reset>       -> Reset
+# <name>        -> variable placeholder
 
 # Don't touch
 version: 2

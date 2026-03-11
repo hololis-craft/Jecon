@@ -1,9 +1,8 @@
 package jp.jyn.jecon.config;
 
-import jp.jyn.jbukkitlib.config.parser.template.StringParser;
-import jp.jyn.jbukkitlib.config.parser.template.TemplateParser;
 import jp.jyn.jbukkitlib.util.PackagePrivate;
-import org.bukkit.ChatColor;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.configuration.ConfigurationSection;
 
 import java.util.Collections;
@@ -12,77 +11,77 @@ import java.util.stream.Collectors;
 
 public class MessageConfig {
     private final static String PREFIX = "[Jecon] ";
-    public final static String HEADER = "========== Jecon ==========";
-    public final static String PLAYER_ONLY = PREFIX + ChatColor.RED + "This command can only be run by players.";
+    public final static Component HEADER = MiniMessage.miniMessage().deserialize("========== Jecon ==========");
+    public final static Component PLAYER_ONLY = MiniMessage.miniMessage().deserialize("[Jecon] <red>This command can only be run by players.");
 
-    public final TemplateParser doNotHavePermission;
-    public final TemplateParser missingArgument;
+    public final MessageTemplate doNotHavePermission;
+    public final MessageTemplate missingArgument;
     /**
      * value
      */
-    public final TemplateParser invalidArgument;
+    public final MessageTemplate invalidArgument;
     /**
      * name
      */
-    public final TemplateParser playerNotFound;
+    public final MessageTemplate playerNotFound;
 
     /**
      * name
      */
-    public final TemplateParser accountNotFound;
-    public final TemplateParser notEnough;
+    public final MessageTemplate accountNotFound;
+    public final MessageTemplate notEnough;
 
     /**
      * name,balance
      */
-    public final TemplateParser show;
+    public final MessageTemplate show;
     /**
      * amount,name
      */
-    public final TemplateParser paySuccess;
+    public final MessageTemplate paySuccess;
     /**
      * amount,name
      */
-    public final TemplateParser payReceive;
+    public final MessageTemplate payReceive;
     /**
      * name,balance
      */
-    public final TemplateParser set;
+    public final MessageTemplate set;
     /**
      * amount,name
      */
-    public final TemplateParser give;
+    public final MessageTemplate give;
     /**
      * amount,name
      */
-    public final TemplateParser take;
+    public final MessageTemplate take;
     /**
      * name,balance
      */
-    public final TemplateParser create;
+    public final MessageTemplate create;
     /**
      * name
      */
-    public final TemplateParser createAlready;
+    public final MessageTemplate createAlready;
     /**
      * name,balance
      */
-    public final TemplateParser remove;
-    public final TemplateParser reloaded;
+    public final MessageTemplate remove;
+    public final MessageTemplate reloaded;
 
     /**
      * page
      */
-    public final TemplateParser topFirst;
+    public final MessageTemplate topFirst;
     /**
      * rank,name,balance
      */
-    public final TemplateParser topEntry;
+    public final MessageTemplate topEntry;
 
     /**
      * old,new,url
      */
-    public final List<TemplateParser> newVersion;
+    public final List<MessageTemplate> newVersion;
 
     public final HelpMessage help;
 
@@ -119,18 +118,18 @@ public class MessageConfig {
     }
 
     public final static class HelpMessage {
-        public final TemplateParser show;
-        public final TemplateParser pay;
-        public final TemplateParser set;
-        public final TemplateParser give;
-        public final TemplateParser take;
-        public final TemplateParser create;
-        public final TemplateParser remove;
-        public final TemplateParser top;
-        public final TemplateParser reload;
-        public final TemplateParser version;
-        public final TemplateParser help;
-        public final TemplateParser example;
+        public final MessageTemplate show;
+        public final MessageTemplate pay;
+        public final MessageTemplate set;
+        public final MessageTemplate give;
+        public final MessageTemplate take;
+        public final MessageTemplate create;
+        public final MessageTemplate remove;
+        public final MessageTemplate top;
+        public final MessageTemplate reload;
+        public final MessageTemplate version;
+        public final MessageTemplate help;
+        public final MessageTemplate example;
 
         private HelpMessage(ConfigurationSection config) {
             show = parse(config.getString("show"));
@@ -148,11 +147,11 @@ public class MessageConfig {
         }
     }
 
-    private static TemplateParser parse(ConfigurationSection config, String key) {
+    private static MessageTemplate parse(ConfigurationSection config, String key) {
         return parse(PREFIX + config.getString(key));
     }
 
-    private static TemplateParser parse(String value) {
-        return StringParser.parse(value);
+    private static MessageTemplate parse(String value) {
+        return new MessageTemplate(value);
     }
 }

@@ -10,6 +10,7 @@ import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MainConfig;
 import jp.jyn.jecon.db.Database;
+import net.kyori.adventure.text.Component;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
 
@@ -38,27 +39,27 @@ public class Convert {
         ConfigurationSection db = yamlConfig.getConfig().getConfigurationSection("database");
 
         if (old.url.startsWith("jdbc:sqlite:")) {
-            sender.sendMessage("Convert from SQLite to MySQL");
-            sender.sendMessage("Convert to:");
-            sender.sendMessage("Host: " + db.getString("mysql.host"));
-            sender.sendMessage("Name: " + db.getString("mysql.name"));
-            sender.sendMessage("User: " + db.getString("mysql.username"));
-            sender.sendMessage("Pass: " + db.getString("mysql.password"));
+            sender.sendMessage(Component.text("Convert from SQLite to MySQL"));
+            sender.sendMessage(Component.text("Convert to:"));
+            sender.sendMessage(Component.text("Host: " + db.getString("mysql.host")));
+            sender.sendMessage(Component.text("Name: " + db.getString("mysql.name")));
+            sender.sendMessage(Component.text("User: " + db.getString("mysql.username")));
+            sender.sendMessage(Component.text("Pass: " + db.getString("mysql.password")));
         } else if (old.url.startsWith("jdbc:mysql:")) {
-            sender.sendMessage("Convert from MySQL to SQLite");
-            sender.sendMessage("Convert to:");
-            sender.sendMessage("File: " + db.getString("sqlite.file"));
+            sender.sendMessage(Component.text("Convert from MySQL to SQLite"));
+            sender.sendMessage(Component.text("Convert to:"));
+            sender.sendMessage(Component.text("File: " + db.getString("sqlite.file")));
         } else {
-            sender.sendMessage("Unsupported Database");
+            sender.sendMessage(Component.text("Unsupported Database"));
             return Command.SINGLE_SUCCESS;
         }
 
-        sender.sendMessage("");
-        sender.sendMessage("All data in the destination database is deleted.");
-        sender.sendMessage("Please be sure to back up.");
-        sender.sendMessage("");
-        sender.sendMessage("If there is no problem, please execute '/money convert confirm'.");
-        sender.sendMessage("If you need to change the settings, edit config.yml.");
+        sender.sendMessage(Component.text(""));
+        sender.sendMessage(Component.text("All data in the destination database is deleted."));
+        sender.sendMessage(Component.text("Please be sure to back up."));
+        sender.sendMessage(Component.text(""));
+        sender.sendMessage(Component.text("If there is no problem, please execute '/money convert confirm'."));
+        sender.sendMessage(Component.text("If you need to change the settings, edit config.yml."));
         return Command.SINGLE_SUCCESS;
     }
 
@@ -73,28 +74,28 @@ public class Convert {
         } else if (old.url.startsWith("jdbc:mysql:")) {
             yamlConfig.getConfig().set("database.type", "sqlite");
         } else {
-            sender.sendMessage("Unsupported Database");
+            sender.sendMessage(Component.text("Unsupported Database"));
             return Command.SINGLE_SUCCESS;
         }
         yamlConfig.saveConfig();
-        sender.sendMessage("Config reloading.");
+        sender.sendMessage(Component.text("Config reloading."));
         config.reloadConfig();
 
-        sender.sendMessage("Connect to database.");
+        sender.sendMessage(Component.text("Connect to database."));
         Database db = Database.connect(config.getMainConfig().database);
 
-        sender.sendMessage("Saving unsaved data.");
+        sender.sendMessage(Component.text("Saving unsaved data."));
         plugin.getSaveAll().run();
 
-        sender.sendMessage("Converting...");
+        sender.sendMessage(Component.text("Converting..."));
         db.convert(oldDB);
-        sender.sendMessage("Converted.");
+        sender.sendMessage(Component.text("Converted."));
 
-        sender.sendMessage("Reloading...");
+        sender.sendMessage(Component.text("Reloading..."));
         plugin.onDisable();
         db.close();
         plugin.onEnable();
-        sender.sendMessage("Successfully completed.");
+        sender.sendMessage(Component.text("Successfully completed."));
         return Command.SINGLE_SUCCESS;
     }
 }

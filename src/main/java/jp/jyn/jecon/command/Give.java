@@ -9,11 +9,11 @@ import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.command.brigadier.argument.ArgumentTypes;
 import io.papermc.paper.command.brigadier.argument.resolvers.selector.PlayerSelectorArgumentResolver;
-import jp.jyn.jbukkitlib.config.parser.template.variable.StringVariable;
 import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MessageConfig;
 import jp.jyn.jecon.repository.BalanceRepository;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
@@ -52,13 +52,13 @@ public class Give {
         BalanceRepository repository = plugin.getRepository();
 
         if (!repository.hasAccount(target.getUniqueId())) {
-            sender.sendMessage(message.accountNotFound.toString("name", target.getName()));
+            sender.sendMessage(message.accountNotFound.toComponent("name", target.getName()));
             return Command.SINGLE_SUCCESS;
         }
         repository.deposit(target.getUniqueId(), amount);
-        sender.sendMessage(message.give.toString(StringVariable.init()
-                .put("name", target.getName())
-                .put("amount", repository.format(amount))));
+        sender.sendMessage(message.give.toComponent(
+                Placeholder.unparsed("name", target.getName()),
+                Placeholder.unparsed("amount", repository.format(amount))));
         return Command.SINGLE_SUCCESS;
     }
 }

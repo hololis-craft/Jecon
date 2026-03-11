@@ -8,11 +8,11 @@ import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.command.brigadier.argument.ArgumentTypes;
 import io.papermc.paper.command.brigadier.argument.resolvers.selector.PlayerSelectorArgumentResolver;
-import jp.jyn.jbukkitlib.config.parser.template.variable.StringVariable;
 import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MessageConfig;
 import jp.jyn.jecon.repository.BalanceRepository;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -42,15 +42,16 @@ public class Show {
         Entity executor = ctx.getSource().getExecutor();
         CommandSender sender = ctx.getSource().getSender();
         if (!(executor instanceof Player player)) {
-            sender.sendPlainMessage(MessageConfig.PLAYER_ONLY);
+            sender.sendMessage(MessageConfig.PLAYER_ONLY);
             return Command.SINGLE_SUCCESS;
         }
         MessageConfig message = config.getMessageConfig();
         BalanceRepository repository = plugin.getRepository();
         sender.sendMessage(repository.format(player.getUniqueId())
-                .map(f -> message.show.toString(
-                        StringVariable.init().put("name", player.getName()).put("balance", f)))
-                .orElseGet(() -> message.accountNotFound.toString("name", player.getName())));
+                .map(f -> message.show.toComponent(
+                        Placeholder.unparsed("name", player.getName()),
+                        Placeholder.unparsed("balance", f)))
+                .orElseGet(() -> message.accountNotFound.toComponent("name", player.getName())));
         return Command.SINGLE_SUCCESS;
     }
 
@@ -66,9 +67,10 @@ public class Show {
         BalanceRepository repository = plugin.getRepository();
         CommandSender sender = ctx.getSource().getSender();
         sender.sendMessage(repository.format(target.getUniqueId())
-                .map(f -> message.show.toString(
-                        StringVariable.init().put("name", target.getName()).put("balance", f)))
-                .orElseGet(() -> message.accountNotFound.toString("name", target.getName())));
+                .map(f -> message.show.toComponent(
+                        Placeholder.unparsed("name", target.getName()),
+                        Placeholder.unparsed("balance", f)))
+                .orElseGet(() -> message.accountNotFound.toComponent("name", target.getName())));
         return Command.SINGLE_SUCCESS;
     }
 }

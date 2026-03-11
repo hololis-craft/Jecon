@@ -1,15 +1,17 @@
 package jp.jyn.jecon;
 
-import jp.jyn.jbukkitlib.config.parser.template.variable.StringVariable;
-import jp.jyn.jbukkitlib.config.parser.template.variable.TemplateVariable;
 import jp.jyn.jbukkitlib.util.updater.GitHubReleaseChecker;
 import jp.jyn.jbukkitlib.util.updater.UpdateChecker;
 import jp.jyn.jecon.config.MessageConfig;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class VersionChecker {
@@ -20,7 +22,7 @@ public class VersionChecker {
     private final UpdateChecker checker = new GitHubReleaseChecker("HimaJyun", "Jecon");
 
     private long nextCheck = 0;
-    private String[] result = null;
+    private List<Component> result = null;
 
     public VersionChecker(boolean enable, MessageConfig message) {
         this.enable = enable;
@@ -34,7 +36,7 @@ public class VersionChecker {
 
         if (nextCheck > System.currentTimeMillis()) {
             if (result != null) {
-                sender.sendMessage(result);
+                result.forEach(sender::sendMessage);
             }
             return;
         }
@@ -49,16 +51,15 @@ public class VersionChecker {
                 return;
             }
 
-            TemplateVariable variable = StringVariable.init()
-                .put("old", currentVersion)
-                .put("new", latest.version)
-                .put("url", latest.url);
             result = Stream.concat(
                 Stream.of(MessageConfig.HEADER),
-                message.newVersion.stream().map(parser -> parser.toString(variable))
-            ).toArray(String[]::new);
+                message.newVersion.stream().map(parser -> parser.toComponent(
+                    Placeholder.unparsed("old", currentVersion),
+                    Placeholder.unparsed("new", latest.version),
+                    Placeholder.unparsed("url", latest.url)))
+            ).collect(Collectors.toList());
 
-            sender.sendMessage(result);
+            result.forEach(sender::sendMessage);
         });
     }
 }

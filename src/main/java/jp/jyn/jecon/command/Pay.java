@@ -9,12 +9,11 @@ import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.command.brigadier.argument.ArgumentTypes;
 import io.papermc.paper.command.brigadier.argument.resolvers.selector.PlayerSelectorArgumentResolver;
-import jp.jyn.jbukkitlib.config.parser.template.variable.StringVariable;
-import jp.jyn.jbukkitlib.config.parser.template.variable.TemplateVariable;
 import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MessageConfig;
 import jp.jyn.jecon.repository.BalanceRepository;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 
@@ -42,7 +41,7 @@ public class Pay {
     private int execute(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
         Entity executor = ctx.getSource().getExecutor();
         if (!(executor instanceof Player player)) {
-            ctx.getSource().getSender().sendPlainMessage(MessageConfig.PLAYER_ONLY);
+            ctx.getSource().getSender().sendMessage(MessageConfig.PLAYER_ONLY);
             return Command.SINGLE_SUCCESS;
         }
 
@@ -56,7 +55,7 @@ public class Pay {
 
         // self check
         if (player.getUniqueId().equals(target.getUniqueId())) {
-            player.sendMessage(config.getMessageConfig().invalidArgument.toString("value", target.getName()));
+            player.sendMessage(config.getMessageConfig().invalidArgument.toComponent("value", target.getName()));
             return Command.SINGLE_SUCCESS;
         }
 
@@ -65,20 +64,24 @@ public class Pay {
         BalanceRepository repository = plugin.getRepository();
 
         if (!repository.has(player.getUniqueId(), amount)) {
-            player.sendMessage(message.notEnough.toString());
+            player.sendMessage(message.notEnough.toComponent());
             return Command.SINGLE_SUCCESS;
         }
         if (!repository.hasAccount(target.getUniqueId())) {
-            player.sendMessage(message.accountNotFound.toString("name", target.getName()));
+            player.sendMessage(message.accountNotFound.toComponent("name", target.getName()));
             return Command.SINGLE_SUCCESS;
         }
 
         repository.withdraw(player.getUniqueId(), amount);
         repository.deposit(target.getUniqueId(), amount);
 
-        TemplateVariable variable = StringVariable.init().put("amount", repository.format(amount));
-        player.sendMessage(message.paySuccess.toString(variable.put("name", target.getName())));
-        target.sendMessage(message.payReceive.toString(variable.put("name", player.getName())));
+        String formattedAmount = repository.format(amount);
+        player.sendMessage(message.paySuccess.toComponent(
+                Placeholder.unparsed("amount", formattedAmount),
+                Placeholder.unparsed("name", target.getName())));
+        target.sendMessage(message.payReceive.toComponent(
+                Placeholder.unparsed("amount", formattedAmount),
+                Placeholder.unparsed("name", player.getName())));
         return Command.SINGLE_SUCCESS;
     }
 }

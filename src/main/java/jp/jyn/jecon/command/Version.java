@@ -10,6 +10,7 @@ import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.VersionChecker;
 import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MessageConfig;
+import net.kyori.adventure.text.Component;
 import org.bukkit.command.CommandSender;
 
 @SuppressWarnings("UnstableApiUsage")
@@ -33,10 +34,10 @@ public class Version {
         PluginMeta meta = plugin.getPluginMeta();
         VersionChecker checker = plugin.getChecker();
         sender.sendMessage(MessageConfig.HEADER);
-        sender.sendMessage(meta.getName() + " - " + meta.getVersion());
-        sender.sendMessage(meta.getDescription() != null ? meta.getDescription() : "");
-        sender.sendMessage("Developer: " + String.join(",", meta.getAuthors()));
-        sender.sendMessage("SourceCode: " + (meta.getWebsite() != null ? meta.getWebsite() : ""));
+        sender.sendMessage(Component.text(meta.getName() + " - " + meta.getVersion()));
+        sender.sendMessage(Component.text(meta.getDescription() != null ? meta.getDescription() : ""));
+        sender.sendMessage(Component.text("Developer: " + String.join(",", meta.getAuthors())));
+        sender.sendMessage(Component.text("SourceCode: " + (meta.getWebsite() != null ? meta.getWebsite() : "")));
         checker.check(sender);
         return Command.SINGLE_SUCCESS;
     }

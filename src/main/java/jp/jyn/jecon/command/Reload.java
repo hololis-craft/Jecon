@@ -38,9 +38,9 @@ public class Reload {
 
         CommandSender sender = ctx.getSource().getSender();
         MessageConfig message = config.getMessageConfig();
-        sender.sendMessage(message.reloaded.toString());
+        sender.sendMessage(message.reloaded.toComponent());
         if (sender instanceof Player) {
-            Bukkit.getConsoleSender().sendMessage(message.reloaded.toString());
+            Bukkit.getConsoleSender().sendMessage(message.reloaded.toComponent());
         }
         return Command.SINGLE_SUCCESS;
     }

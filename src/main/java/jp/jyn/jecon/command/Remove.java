@@ -8,11 +8,11 @@ import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.command.brigadier.argument.ArgumentTypes;
 import io.papermc.paper.command.brigadier.argument.resolvers.selector.PlayerSelectorArgumentResolver;
-import jp.jyn.jbukkitlib.config.parser.template.variable.StringVariable;
 import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MessageConfig;
 import jp.jyn.jecon.repository.BalanceRepository;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
@@ -51,13 +51,13 @@ public class Remove {
 
         Optional<BigDecimal> balance = repository.getDecimal(target.getUniqueId());
         if (balance.isEmpty()) {
-            sender.sendMessage(message.accountNotFound.toString("name", target.getName()));
+            sender.sendMessage(message.accountNotFound.toComponent("name", target.getName()));
             return Command.SINGLE_SUCCESS;
         }
         repository.removeAccount(target.getUniqueId());
-        sender.sendMessage(message.remove.toString(StringVariable.init()
-                .put("name", target.getName())
-                .put("balance", repository.format(balance.get()))));
+        sender.sendMessage(message.remove.toComponent(
+                Placeholder.unparsed("name", target.getName()),
+                Placeholder.unparsed("balance", repository.format(balance.get()))));
         return Command.SINGLE_SUCCESS;
     }
 }
