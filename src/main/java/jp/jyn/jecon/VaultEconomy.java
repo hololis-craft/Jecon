@@ -1,8 +1,8 @@
 package jp.jyn.jecon;
 
 import jp.jyn.jbukkitlib.util.PackagePrivate;
-import jp.jyn.jbukkitlib.uuid.UUIDRegistry;
 import jp.jyn.jecon.config.MainConfig;
+import jp.jyn.jecon.db.Database;
 import jp.jyn.jecon.repository.AbstractRepository;
 import jp.jyn.jecon.repository.BalanceRepository;
 import net.milkbowl.vault.economy.Economy;
@@ -19,18 +19,18 @@ import java.util.UUID;
 class VaultEconomy implements Economy {
     private BigDecimal defaultBalance;
 
-    private UUIDRegistry registry;
+    private Database db;
     private MainConfig config;
     private BalanceRepository repository;
 
     @PackagePrivate
-    VaultEconomy(MainConfig config, UUIDRegistry registry, BalanceRepository repository) {
-        this.init(config, registry, repository);
+    VaultEconomy(MainConfig config, Database db, BalanceRepository repository) {
+        this.init(config, db, repository);
     }
 
     @PackagePrivate
-    void init(MainConfig config, UUIDRegistry registry, BalanceRepository repository) {
-        this.registry = registry;
+    void init(MainConfig config, Database db, BalanceRepository repository) {
+        this.db = db;
         this.config = config;
         this.repository = repository;
 
@@ -77,7 +77,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public boolean hasAccount(String s) {
-        return registry.getUUID(s).map(repository::hasAccount).orElse(false);
+        return db.findUuidByExactCachedName(s).map(repository::hasAccount).orElse(false);
     }
 
     @Override
@@ -97,7 +97,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public double getBalance(String s) {
-        return registry.getUUID(s)
+        return db.findUuidByExactCachedName(s)
             .map(repository::getDouble)
             .orElse(OptionalDouble.empty())
             .orElse(0);
@@ -120,7 +120,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public boolean has(String s, double v) {
-        return registry.getUUID(s).map(uuid -> repository.has(uuid, v)).orElse(false);
+        return db.findUuidByExactCachedName(s).map(uuid -> repository.has(uuid, v)).orElse(false);
     }
 
     @Override
@@ -140,7 +140,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public boolean createPlayerAccount(String s) {
-        return registry.getUUID(s).map(uuid -> repository.createAccount(uuid, defaultBalance)).orElse(false);
+        return db.findUuidByExactCachedName(s).map(uuid -> repository.createAccount(uuid, defaultBalance)).orElse(false);
     }
 
     @Override
@@ -172,7 +172,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public EconomyResponse withdrawPlayer(String s, double v) {
-        return registry.getUUID(s)
+        return db.findUuidByExactCachedName(s)
             .map(uuid -> withdrawPlayer(uuid, v))
             .orElseGet(() -> new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "User does not exist"));
     }
@@ -206,7 +206,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public EconomyResponse depositPlayer(String s, double v) {
-        return registry.getUUID(s)
+        return db.findUuidByExactCachedName(s)
             .map(uuid -> depositPlayer(uuid, v))
             .orElseGet(() -> new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "User does not exist"));
     }

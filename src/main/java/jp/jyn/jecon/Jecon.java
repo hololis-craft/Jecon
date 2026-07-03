@@ -5,7 +5,6 @@ import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
-import jp.jyn.jbukkitlib.uuid.UUIDRegistry;
 import jp.jyn.jecon.command.Convert;
 import jp.jyn.jecon.command.Create;
 import jp.jyn.jecon.command.Give;
@@ -49,7 +48,6 @@ public class Jecon extends JavaPlugin {
     private VaultEconomy economy;
 
     // Fields elevated for cross-reload access
-    private UUIDRegistry registry;
     private Database db;
     private VersionChecker checker;
     private Runnable saveAll;
@@ -71,9 +69,6 @@ public class Jecon extends JavaPlugin {
         config.reloadConfig();
         MainConfig main = config.getMainConfig();
 
-        if (registry == null) {
-            registry = UUIDRegistry.getSharedCacheRegistry(this);
-        }
         if (checker == null) {
             checker = new VersionChecker(main.versionCheck, config.getMessageConfig());
         }
@@ -124,7 +119,7 @@ public class Jecon extends JavaPlugin {
                 }
             }
         } else {
-            economy.init(main, registry, repository);
+            economy.init(main, db, repository);
         }
 
         // register events
@@ -176,7 +171,7 @@ public class Jecon extends JavaPlugin {
             return;
         }
 
-        economy = new VaultEconomy(config.getMainConfig(), registry, repository);
+        economy = new VaultEconomy(config.getMainConfig(), db, repository);
         getServer().getServicesManager().register(Economy.class, economy, this, ServicePriority.Normal);
         getLogger().info("Hooked Vault");
     }
@@ -204,10 +199,6 @@ public class Jecon extends JavaPlugin {
      */
     public BalanceRepository getRepository() {
         return repository;
-    }
-
-    public UUIDRegistry getRegistry() {
-        return registry;
     }
 
     public Database getDb() {
