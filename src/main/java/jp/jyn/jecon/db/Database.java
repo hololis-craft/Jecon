@@ -2,7 +2,6 @@ package jp.jyn.jecon.db;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
-import jp.jyn.jbukkitlib.uuid.UUIDBytes;
 import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.config.MainConfig;
 import jp.jyn.jecon.db.driver.MySQL;

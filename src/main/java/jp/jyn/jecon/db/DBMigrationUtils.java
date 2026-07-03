@@ -1,7 +1,6 @@
 package jp.jyn.jecon.db;
 
 import com.zaxxer.hikari.HikariDataSource;
-import jp.jyn.jbukkitlib.uuid.UUIDBytes;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;

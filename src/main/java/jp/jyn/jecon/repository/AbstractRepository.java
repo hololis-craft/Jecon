@@ -1,7 +1,5 @@
 package jp.jyn.jecon.repository;
 
-import jp.jyn.jbukkitlib.config.parser.template.variable.StringVariable;
-import jp.jyn.jbukkitlib.config.parser.template.variable.TemplateVariable;
 import jp.jyn.jecon.config.MainConfig;
 import jp.jyn.jecon.db.Database;
 
@@ -21,7 +19,7 @@ public abstract class AbstractRepository implements BalanceRepository {
     protected final static int MULTIPLIER = 100;
 
     private final NumberFormat numberFormat = NumberFormat.getNumberInstance();
-    private final StringVariable variable = StringVariable.init();
+    private final Map<String, String> formatVariables = new HashMap<>(4);
 
     protected final Database db;
     private final MainConfig.FormatConfig formatConfig;
@@ -62,13 +60,13 @@ public abstract class AbstractRepository implements BalanceRepository {
     private String format(long value) {
         long major = value / MULTIPLIER;
         long minor = value % MULTIPLIER;
-        TemplateVariable v = variable.clear()
-            .put("major", numberFormat.format(major))
-            .put("minor", minorFormat.apply(minor))
-            .put("majorcurrency", major > 1 ? formatConfig.pluralMajor : formatConfig.singularMajor)
-            .put("minorcurrency", minor > 1 ? formatConfig.pluralMinor : formatConfig.singularMinor);
+        formatVariables.clear();
+        formatVariables.put("major", numberFormat.format(major));
+        formatVariables.put("minor", minorFormat.apply(minor));
+        formatVariables.put("majorcurrency", major > 1 ? formatConfig.pluralMajor : formatConfig.singularMajor);
+        formatVariables.put("minorcurrency", minor > 1 ? formatConfig.pluralMinor : formatConfig.singularMinor);
 
-        return (minor == 0 ? formatConfig.formatZeroMinor : formatConfig.format).toString(v);
+        return (minor == 0 ? formatConfig.formatZeroMinor : formatConfig.format).format(formatVariables);
     }
 
     private String minorOmit(long minor) {

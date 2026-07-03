@@ -1,6 +1,5 @@
 package jp.jyn.jecon;
 
-import jp.jyn.jbukkitlib.util.PackagePrivate;
 import jp.jyn.jecon.config.MainConfig;
 import jp.jyn.jecon.db.Database;
 import jp.jyn.jecon.repository.AbstractRepository;
@@ -15,7 +14,6 @@ import java.util.List;
 import java.util.OptionalDouble;
 import java.util.UUID;
 
-@PackagePrivate
 class VaultEconomy implements Economy {
     private BigDecimal defaultBalance;
 
@@ -23,12 +21,10 @@ class VaultEconomy implements Economy {
     private MainConfig config;
     private BalanceRepository repository;
 
-    @PackagePrivate
     VaultEconomy(MainConfig config, Database db, BalanceRepository repository) {
         this.init(config, db, repository);
     }
 
-    @PackagePrivate
     void init(MainConfig config, Database db, BalanceRepository repository) {
         this.db = db;
         this.config = config;

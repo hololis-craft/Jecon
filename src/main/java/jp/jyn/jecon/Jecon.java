@@ -23,7 +23,6 @@ import jp.jyn.jecon.repository.BalanceRepository;
 import jp.jyn.jecon.repository.LazyRepository;
 import jp.jyn.jecon.repository.SyncRepository;
 import net.milkbowl.vault.economy.Economy;
-import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
@@ -31,7 +30,6 @@ import org.bukkit.event.server.PluginEnableEvent;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -49,7 +47,6 @@ public class Jecon extends JavaPlugin {
 
     // Fields elevated for cross-reload access
     private Database db;
-    private VersionChecker checker;
     private Runnable saveAll;
 
     // Stack(LIFO)
@@ -68,15 +65,6 @@ public class Jecon extends JavaPlugin {
         }
         config.reloadConfig();
         MainConfig main = config.getMainConfig();
-
-        if (checker == null) {
-            checker = new VersionChecker(main.versionCheck, config.getMessageConfig());
-        }
-
-        BukkitTask task = getServer().getScheduler().runTaskLater(
-                this,
-                () -> checker.check(Bukkit.getConsoleSender()), 20 * 30);
-        destructor.addFirst(task::cancel);
 
         // connect db
         db = Database.connect(main.database);
@@ -124,7 +112,7 @@ public class Jecon extends JavaPlugin {
 
         // register events
         getServer().getPluginManager().registerEvents(
-                new EventListener(this, main, checker, repository, consistency, save), this);
+                new EventListener(this, main, repository, consistency, save), this);
         destructor.addFirst(() -> HandlerList.unregisterAll(this));
 
         // register commands via Brigadier (only once per plugin lifecycle)
@@ -203,10 +191,6 @@ public class Jecon extends JavaPlugin {
 
     public Database getDb() {
         return db;
-    }
-
-    public VersionChecker getChecker() {
-        return checker;
     }
 
     public Runnable getSaveAll() {

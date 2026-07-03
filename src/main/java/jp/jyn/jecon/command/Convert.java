@@ -5,7 +5,6 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
-import jp.jyn.jbukkitlib.config.YamlLoader;
 import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MainConfig;
@@ -34,9 +33,8 @@ public class Convert {
 
     private int executeConfirm(CommandContext<CommandSourceStack> ctx) {
         CommandSender sender = ctx.getSource().getSender();
-        YamlLoader yamlConfig = new YamlLoader(plugin, "config.yml");
         MainConfig.DatabaseConfig old = config.getMainConfig().database;
-        ConfigurationSection db = yamlConfig.getConfig().getConfigurationSection("database");
+        ConfigurationSection db = plugin.getConfig().getConfigurationSection("database");
 
         if (old.url.startsWith("jdbc:sqlite:")) {
             sender.sendMessage(Component.text("Convert from SQLite to MySQL"));
@@ -65,19 +63,18 @@ public class Convert {
 
     private int executeConvert(CommandContext<CommandSourceStack> ctx) {
         CommandSender sender = ctx.getSource().getSender();
-        YamlLoader yamlConfig = new YamlLoader(plugin, "config.yml");
         MainConfig.DatabaseConfig old = config.getMainConfig().database;
         Database oldDB = plugin.getDb();
 
         if (old.url.startsWith("jdbc:sqlite:")) {
-            yamlConfig.getConfig().set("database.type", "mysql");
+            plugin.getConfig().set("database.type", "mysql");
         } else if (old.url.startsWith("jdbc:mysql:")) {
-            yamlConfig.getConfig().set("database.type", "sqlite");
+            plugin.getConfig().set("database.type", "sqlite");
         } else {
             sender.sendMessage(Component.text("Unsupported Database"));
             return Command.SINGLE_SUCCESS;
         }
-        yamlConfig.saveConfig();
+        plugin.saveConfig();
         sender.sendMessage(Component.text("Config reloading."));
         config.reloadConfig();
 

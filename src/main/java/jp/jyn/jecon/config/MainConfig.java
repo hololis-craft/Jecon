@@ -1,8 +1,5 @@
 package jp.jyn.jecon.config;
 
-import jp.jyn.jbukkitlib.config.parser.template.StringParser;
-import jp.jyn.jbukkitlib.config.parser.template.TemplateParser;
-import jp.jyn.jbukkitlib.util.PackagePrivate;
 import jp.jyn.jecon.Jecon;
 import org.bukkit.configuration.ConfigurationSection;
 
@@ -12,8 +9,6 @@ import java.util.Locale;
 import java.util.Properties;
 
 public class MainConfig {
-    public final boolean versionCheck;
-
     public final BigDecimal defaultBalance;
     public final boolean createAccountOnJoin;
 
@@ -22,9 +17,7 @@ public class MainConfig {
     public final FormatConfig format;
     public final DatabaseConfig database;
 
-    @PackagePrivate
     MainConfig(ConfigurationSection config) {
-        versionCheck = config.getBoolean("versionCheck");
         defaultBalance = new BigDecimal(config.getString("defaultBalance"));
         createAccountOnJoin = config.getBoolean("createAccountOnJoin");
 
@@ -42,8 +35,8 @@ public class MainConfig {
         public final String pluralMajor;
         public final String singularMinor;
         public final String pluralMinor;
-        public final TemplateParser format;
-        public final TemplateParser formatZeroMinor;
+        public final FormatTemplate format;
+        public final FormatTemplate formatZeroMinor;
         public final MinorType minorType;
 
         private FormatConfig(ConfigurationSection config) {
@@ -51,9 +44,9 @@ public class MainConfig {
             pluralMajor = config.getString("pluralMajor");
             singularMinor = config.getString("singularMinor");
             pluralMinor = config.getString("pluralMinor");
-            format = StringParser.parse(config.getString("format"));
+            format = new FormatTemplate(config.getString("format"));
             if (config.contains("formatZeroMinor")) {
-                formatZeroMinor = StringParser.parse(config.getString("formatZeroMinor"));
+                formatZeroMinor = new FormatTemplate(config.getString("formatZeroMinor"));
             } else {
                 formatZeroMinor = format;
             }

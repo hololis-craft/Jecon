@@ -1,6 +1,5 @@
 package jp.jyn.jecon;
 
-import jp.jyn.jbukkitlib.util.PackagePrivate;
 import jp.jyn.jecon.config.MainConfig;
 import jp.jyn.jecon.repository.BalanceRepository;
 import org.bukkit.entity.Player;
@@ -14,26 +13,22 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 @SuppressWarnings("unused")
-@PackagePrivate
 class EventListener implements Listener {
     private final Jecon plugin;
     private final boolean createAccountOnJoin;
     private final BigDecimal defaultBalance;
 
-    private final VersionChecker checker;
     private final BalanceRepository repository;
 
     private final Consumer<UUID> consistency;
     private final Consumer<UUID> save;
 
-    @PackagePrivate
-    EventListener(Jecon plugin, MainConfig config, VersionChecker checker, BalanceRepository repository,
+    EventListener(Jecon plugin, MainConfig config, BalanceRepository repository,
                   Consumer<UUID> consistency, Consumer<UUID> save) {
         this.plugin = plugin;
         this.createAccountOnJoin = config.createAccountOnJoin;
         this.defaultBalance = config.defaultBalance;
 
-        this.checker = checker;
         this.repository = repository;
         this.consistency = consistency;
         this.save = save;
@@ -42,10 +37,6 @@ class EventListener implements Listener {
     @EventHandler(ignoreCancelled = true)
     public void onPlayerJoin(PlayerJoinEvent e) {
         Player player = e.getPlayer();
-        if (player.hasPermission("jecon.version")) {
-            checker.check(player);
-        }
-
         plugin.getDb().getId(player.getUniqueId());
         plugin.getDb().cachePlayerName(player.getUniqueId(), player.getName());
 

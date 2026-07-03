@@ -1,41 +1,56 @@
 package jp.jyn.jecon.config;
 
-import jp.jyn.jbukkitlib.config.YamlLoader;
 import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.config.migration.MainMigration;
 import jp.jyn.jecon.config.migration.MessageMigration;
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.Plugin;
 
-public class ConfigLoader {
-    private final YamlLoader mainLoader;
-    private MainConfig mainConfig;
+import java.io.File;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 
-    private final YamlLoader messageLoader;
+public class ConfigLoader {
+    private static final String MESSAGE_FILE = "message.yml";
+
+    private final Plugin plugin;
+    private final File messageFile;
+
+    private MainConfig mainConfig;
+    private FileConfiguration messageYaml;
     private MessageConfig messageConfig;
 
     public ConfigLoader() {
-        Plugin plugin = Jecon.getInstance();
-        this.mainLoader = new YamlLoader(plugin, "config.yml");
-        this.messageLoader = new YamlLoader(plugin, "message.yml");
+        this.plugin = Jecon.getInstance();
+        this.messageFile = new File(plugin.getDataFolder(), MESSAGE_FILE);
     }
 
     public void reloadConfig() {
-        mainLoader.saveDefaultConfig();
-        messageLoader.saveDefaultConfig();
-        if (mainConfig != null || messageConfig != null) {
-            mainLoader.reloadConfig();
-            messageLoader.reloadConfig();
+        plugin.saveDefaultConfig();
+        if (!messageFile.exists()) {
+            plugin.saveResource(MESSAGE_FILE, false);
         }
 
-        if (MainMigration.migration(mainLoader.getConfig())) {
-            mainLoader.saveConfig();
+        if (mainConfig != null) {
+            plugin.reloadConfig();
         }
-        if (MessageMigration.migration(messageLoader.getConfig())) {
-            messageLoader.saveConfig();
+        messageYaml = YamlConfiguration.loadConfiguration(messageFile);
+
+        FileConfiguration mainYaml = plugin.getConfig();
+        if (MainMigration.migration(mainYaml)) {
+            plugin.saveConfig();
+        }
+        if (MessageMigration.migration(messageYaml)) {
+            try {
+                messageYaml.save(messageFile);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
 
-        mainConfig = new MainConfig(mainLoader.getConfig());
-        messageConfig = new MessageConfig(messageLoader.getConfig());
+        mainConfig = new MainConfig(mainYaml);
+        messageConfig = new MessageConfig(messageYaml);
     }
 
     public MainConfig getMainConfig() {

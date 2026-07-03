@@ -20,10 +20,6 @@ reloaded: "Config has been reloaded."
 topFirst: "<green>======<reset> Billionaires ranking (Page: <page>) <green>======"
 topEntry: "<rank>: <name> (<balance>)"
 
-newVersion:
-    - "New version available: <old> -> <new>"
-    - "Download: <url>"
-
 help:
     show: "Show money."
     pay: "Send <amount> to <player>."
@@ -34,7 +30,7 @@ help:
     remove: "Remove <player> account."
     top: "Show billionaires ranking."
     reload: "Reload the config."
-    version: "Show version and check new version."
+    version: "Show version."
     help: "Show helps."
     example: "Example:"
 

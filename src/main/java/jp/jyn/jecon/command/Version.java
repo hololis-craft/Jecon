@@ -7,7 +7,6 @@ import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.plugin.configuration.PluginMeta;
 import jp.jyn.jecon.Jecon;
-import jp.jyn.jecon.VersionChecker;
 import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MessageConfig;
 import net.kyori.adventure.text.Component;
@@ -32,13 +31,11 @@ public class Version {
     private int execute(CommandContext<CommandSourceStack> ctx) {
         CommandSender sender = ctx.getSource().getSender();
         PluginMeta meta = plugin.getPluginMeta();
-        VersionChecker checker = plugin.getChecker();
         sender.sendMessage(MessageConfig.HEADER);
         sender.sendMessage(Component.text(meta.getName() + " - " + meta.getVersion()));
         sender.sendMessage(Component.text(meta.getDescription() != null ? meta.getDescription() : ""));
         sender.sendMessage(Component.text("Developer: " + String.join(",", meta.getAuthors())));
         sender.sendMessage(Component.text("SourceCode: " + (meta.getWebsite() != null ? meta.getWebsite() : "")));
-        checker.check(sender);
         return Command.SINGLE_SUCCESS;
     }
 }

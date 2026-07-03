@@ -26,14 +26,12 @@ repositories {
     maven("https://repo.papermc.io/repository/maven-public/")
     maven("https://himajyun.github.io/mvn-repo/")
     maven("https://jitpack.io")
+    maven("https://repo.codemc.io/repository/creatorfromhell/")
 }
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT")
-    compileOnly("com.github.MilkBowl:VaultAPI:1.7") {
-        exclude(group = "org.bukkit", module = "bukkit")
-    }
-    implementation("jp.jyn:JBukkitLib:1.4.0")
+    compileOnly("net.milkbowl.vault:VaultUnlockedAPI:2.16")
     implementation("com.zaxxer:HikariCP:5.1.0")
 }
 
@@ -53,10 +51,8 @@ tasks.shadowJar {
     archiveClassifier = ""
     archiveBaseName = "Jecon"
     dependencies {
-        include(dependency("jp.jyn:JBukkitLib"))
         include(dependency("com.zaxxer:HikariCP"))
     }
-    relocate("jp.jyn.jbukkitlib", "$relocBase.jbukkitlib")
     relocate("com.zaxxer.hikari",  "$relocBase.hikari")
     minimize()
 }

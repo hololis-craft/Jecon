@@ -1,13 +1,8 @@
 package jp.jyn.jecon.config;
 
-import jp.jyn.jbukkitlib.util.PackagePrivate;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.configuration.ConfigurationSection;
-
-import java.util.Collections;
-import java.util.List;
-import java.util.stream.Collectors;
 
 public class MessageConfig {
     private final static String PREFIX = "[Jecon] ";
@@ -78,14 +73,8 @@ public class MessageConfig {
      */
     public final MessageTemplate topEntry;
 
-    /**
-     * old,new,url
-     */
-    public final List<MessageTemplate> newVersion;
-
     public final HelpMessage help;
 
-    @PackagePrivate
     MessageConfig(ConfigurationSection config) {
         doNotHavePermission = parse(config, "doNotHavePermission");
         missingArgument = parse(config, "missingArgument");
@@ -108,11 +97,6 @@ public class MessageConfig {
 
         topFirst = parse(config.getString("topFirst"));
         topEntry = parse(config.getString("topEntry"));
-
-        newVersion = config.getStringList("newVersion")
-            .stream()
-            .map(MessageConfig::parse)
-            .collect(Collectors.collectingAndThen(Collectors.toList(), Collections::unmodifiableList));
 
         help = new HelpMessage(config.getConfigurationSection("help"));
     }

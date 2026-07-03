@@ -1,6 +1,3 @@
-# Check new version.
-versionCheck: true
-
 defaultBalance: 10000.0
 createAccountOnJoin: true
 
