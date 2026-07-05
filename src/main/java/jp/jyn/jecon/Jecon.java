@@ -52,6 +52,7 @@ public class Jecon extends JavaPlugin {
     private ConfigLoader config;
     private BalanceRepository repository;
     private VaultEconomy economy;
+    private VaultUnlockedEconomy economyUnlocked;
     private AccountService accountService;
     private TransferService transferService;
     private ModifierRegistry modifierRegistry;
@@ -109,7 +110,7 @@ public class Jecon extends JavaPlugin {
             modifierRegistry = null;
         });
 
-        // register vault
+        // register vault (旧 Vault)
         if (economy == null) {
             Plugin vault = getServer().getPluginManager().getPlugin("Vault");
             if (vault != null) {
@@ -121,6 +122,12 @@ public class Jecon extends JavaPlugin {
             }
         } else {
             economy.init(main, db, repository, transferService, accountService);
+        }
+
+        // register VaultUnlocked (Vault 2.x)
+        Plugin vault2 = getServer().getPluginManager().getPlugin("VaultUnlocked");
+        if (vault2 != null) {
+            hookVaultUnlocked();
         }
 
         // register events
@@ -175,6 +182,20 @@ public class Jecon extends JavaPlugin {
         economy = new VaultEconomy(config.getMainConfig(), db, repository, transferService, accountService);
         getServer().getServicesManager().register(Economy.class, economy, this, ServicePriority.Normal);
         getLogger().info("Hooked Vault");
+    }
+
+    private void hookVaultUnlocked() {
+        if (economyUnlocked != null) {
+            return;
+        }
+        try {
+            economyUnlocked = new VaultUnlockedEconomy(config.getMainConfig(), db, repository, transferService, accountService);
+            getServer().getServicesManager().register(
+                net.milkbowl.vault2.economy.Economy.class, economyUnlocked, this, ServicePriority.Normal);
+            getLogger().info("Hooked VaultUnlocked");
+        } catch (NoClassDefFoundError e) {
+            getLogger().warning("VaultUnlocked plugin was detected but API classes are missing: " + e.getMessage());
+        }
     }
 
     @Override
@@ -237,6 +258,8 @@ public class Jecon extends JavaPlugin {
         ensureSystemAccount(SyncRepository.LEGACY_SOURCE_UUID, SyncRepository.LEGACY_SOURCE_ALIAS);
         ensureSystemAccount(SyncRepository.LEGACY_SINK_UUID, SyncRepository.LEGACY_SINK_ALIAS);
         ensureSystemAccount(VaultEconomy.VAULT_BRIDGE_UUID, VaultEconomy.VAULT_BRIDGE_ALIAS);
+        ensureSystemAccount(VaultUnlockedEconomy.VAULT_UNLOCKED_BRIDGE_UUID,
+            VaultUnlockedEconomy.VAULT_UNLOCKED_BRIDGE_ALIAS);
     }
 
     private void ensureSystemAccount(java.util.UUID uuid, String alias) {

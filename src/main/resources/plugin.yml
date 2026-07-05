@@ -5,7 +5,7 @@ website: "${url}"
 author: "HimaJyun( https://jyn.jp/ )"
 description: "${description}"
 load: "STARTUP"
-loadbefore: ["Vault"]
+loadbefore: ["Vault", "VaultUnlocked"]
 api-version: "1.21"
 
 permissions:
