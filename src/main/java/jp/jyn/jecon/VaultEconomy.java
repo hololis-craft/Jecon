@@ -1,9 +1,15 @@
 package jp.jyn.jecon;
 
+import jp.jyn.jecon.account.AccountService;
+import jp.jyn.jecon.account.Aliases;
 import jp.jyn.jecon.config.MainConfig;
 import jp.jyn.jecon.db.Database;
 import jp.jyn.jecon.repository.AbstractRepository;
 import jp.jyn.jecon.repository.BalanceRepository;
+import jp.jyn.jecon.transfer.TransferContext;
+import jp.jyn.jecon.transfer.TransferResult;
+import jp.jyn.jecon.transfer.TransferService;
+import jp.jyn.jecon.vault.VaultCallerGuess;
 import net.milkbowl.vault.economy.Economy;
 import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.OfflinePlayer;
@@ -11,24 +17,40 @@ import org.bukkit.OfflinePlayer;
 import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
-import java.util.OptionalDouble;
 import java.util.UUID;
 
+/**
+ * 旧 Vault ({@code net.milkbowl.vault.economy.Economy}) を実装するブリッジ。
+ *
+ * <p>{@code depositPlayer} / {@code withdrawPlayer} を {@link TransferService} に翻訳し、
+ * ctx.source={@code "vault_bridge"}、metadata[{@code "vault_caller"}] に呼び出し元プラグイン名を載せる
+ * （ADR-0006、08-vault-bridge.md）。対向は {@code system:vault_bridge} 口座。
+ */
 class VaultEconomy implements Economy {
+    /** Vault 経由呼び出しの対向口座。 */
+    public static final String VAULT_BRIDGE_ALIAS = "system:vault_bridge";
+    public static final UUID VAULT_BRIDGE_UUID = Aliases.uuidFromAlias(VAULT_BRIDGE_ALIAS);
+
     private BigDecimal defaultBalance;
 
     private Database db;
     private MainConfig config;
     private BalanceRepository repository;
+    private TransferService transferService;
+    private AccountService accountService;
 
-    VaultEconomy(MainConfig config, Database db, BalanceRepository repository) {
-        this.init(config, db, repository);
+    VaultEconomy(MainConfig config, Database db, BalanceRepository repository,
+                 TransferService transferService, AccountService accountService) {
+        this.init(config, db, repository, transferService, accountService);
     }
 
-    void init(MainConfig config, Database db, BalanceRepository repository) {
+    void init(MainConfig config, Database db, BalanceRepository repository,
+              TransferService transferService, AccountService accountService) {
         this.db = db;
         this.config = config;
         this.repository = repository;
+        this.transferService = transferService;
+        this.accountService = accountService;
 
         this.defaultBalance = config.defaultBalance;
     }
@@ -45,14 +67,6 @@ class VaultEconomy implements Economy {
 
     @Override
     public int fractionalDigits() {
-        /* Hint: How does Jecon keep decimals?
-            Jecon multiplies the value up to two decimal places by 100 times and treats it.
-            (This is the same mechanism as Raspberry Pi CPU temperature, It can be obtained from /sys/class/thermal/thermal_zone0/temp)
-            In general, the value below the decimal point of the currency is 1/100 (cent, JPY '銭', etc.)
-
-            Of course, it is also possible to make it more accurate. (However, in that case, the maximum value decreases)
-            If you want it please post Issue.
-         */
         return AbstractRepository.FRACTIONAL_DIGITS;
     }
 
@@ -73,7 +87,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public boolean hasAccount(String s) {
-        return db.resolveAlias(s).map(repository::hasAccount).orElse(false);
+        return accountService.resolveAlias(s).map(repository::hasAccount).orElse(false);
     }
 
     @Override
@@ -93,10 +107,9 @@ class VaultEconomy implements Economy {
 
     @Override
     public double getBalance(String s) {
-        return db.resolveAlias(s)
-            .map(repository::getDouble)
-            .orElse(OptionalDouble.empty())
-            .orElse(0);
+        return accountService.resolveAlias(s)
+            .map(uuid -> repository.getDouble(uuid).orElse(0D))
+            .orElse(0D);
     }
 
     @Override
@@ -116,7 +129,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public boolean has(String s, double v) {
-        return db.resolveAlias(s).map(uuid -> repository.has(uuid, v)).orElse(false);
+        return accountService.resolveAlias(s).map(uuid -> repository.has(uuid, v)).orElse(false);
     }
 
     @Override
@@ -136,12 +149,19 @@ class VaultEconomy implements Economy {
 
     @Override
     public boolean createPlayerAccount(String s) {
-        return db.resolveAlias(s).map(uuid -> repository.createAccount(uuid, defaultBalance)).orElse(false);
+        return accountService.resolveAlias(s).map(uuid -> repository.createAccount(uuid, defaultBalance)).orElse(false);
     }
 
     @Override
     public boolean createPlayerAccount(OfflinePlayer offlinePlayer) {
-        return repository.createAccount(offlinePlayer.getUniqueId(), defaultBalance);
+        UUID uuid = offlinePlayer.getUniqueId();
+        String name = offlinePlayer.getName();
+        // account 行を確保。名前が判明していれば alias として反映する。
+        db.getOrCreatePlayerId(uuid);
+        if (name != null && !name.isEmpty()) {
+            db.renameAccount(uuid, name);
+        }
+        return repository.createAccount(uuid, defaultBalance);
     }
 
     @Override
@@ -158,17 +178,12 @@ class VaultEconomy implements Economy {
         if (value < 0) {
             return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Cannot withdraw negative funds");
         }
-
-        if (repository.withdraw(uuid, value)) {
-            return new EconomyResponse(0, repository.getDouble(uuid).orElse(0), EconomyResponse.ResponseType.SUCCESS, "OK");
-        } else {
-            return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Account does not exist");
-        }
+        return runVaultTransfer(uuid, VAULT_BRIDGE_UUID, value, "withdrawPlayer");
     }
 
     @Override
     public EconomyResponse withdrawPlayer(String s, double v) {
-        return db.resolveAlias(s)
+        return accountService.resolveAlias(s)
             .map(uuid -> withdrawPlayer(uuid, v))
             .orElseGet(() -> new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "User does not exist"));
     }
@@ -192,17 +207,12 @@ class VaultEconomy implements Economy {
         if (value < 0) {
             return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Cannot deposit negative funds");
         }
-
-        if (repository.deposit(uuid, value)) {
-            return new EconomyResponse(0, repository.getDouble(uuid).orElse(0), EconomyResponse.ResponseType.SUCCESS, "OK");
-        } else {
-            return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Account does not exist");
-        }
+        return runVaultTransfer(VAULT_BRIDGE_UUID, uuid, value, "depositPlayer");
     }
 
     @Override
     public EconomyResponse depositPlayer(String s, double v) {
-        return db.resolveAlias(s)
+        return accountService.resolveAlias(s)
             .map(uuid -> depositPlayer(uuid, v))
             .orElseGet(() -> new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "User does not exist"));
     }
@@ -220,6 +230,45 @@ class VaultEconomy implements Economy {
     @Override
     public EconomyResponse depositPlayer(OfflinePlayer offlinePlayer, String s, double v) {
         return depositPlayer(offlinePlayer, v);
+    }
+
+    private EconomyResponse runVaultTransfer(UUID from, UUID to, double amount, String vaultMethod) {
+        // 対向が player 側の場合、対象口座が存在しなければエラー。
+        UUID player = from.equals(VAULT_BRIDGE_UUID) ? to : from;
+        if (!repository.hasAccount(player)) {
+            return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Account does not exist");
+        }
+
+        BigDecimal decimal = BigDecimal.valueOf(amount).setScale(AbstractRepository.FRACTIONAL_DIGITS,
+            java.math.RoundingMode.HALF_UP);
+
+        String caller = VaultCallerGuess.guess();
+        TransferContext ctx = TransferContext.builder()
+            .source("vault_bridge")
+            .metadata("vault_caller", caller)
+            .metadata("vault_method", vaultMethod)
+            .withOverdraft()  // system:vault_bridge は常時 overdraft
+            .build();
+        TransferResult result = transferService.transfer(from, to, decimal, ctx);
+        return mapResult(result, player);
+    }
+
+    private EconomyResponse mapResult(TransferResult result, UUID player) {
+        double newBalance = repository.getDouble(player).orElse(0D);
+        return switch (result) {
+            case TransferResult.Success s -> {
+                BigDecimal amount = s.legs().isEmpty() ? BigDecimal.ZERO : s.legs().get(0).amount();
+                yield new EconomyResponse(amount.doubleValue(), newBalance, EconomyResponse.ResponseType.SUCCESS, "OK");
+            }
+            case TransferResult.InsufficientFunds ignored ->
+                new EconomyResponse(0, newBalance, EconomyResponse.ResponseType.FAILURE, "Insufficient funds");
+            case TransferResult.Vetoed v ->
+                new EconomyResponse(0, newBalance, EconomyResponse.ResponseType.FAILURE, v.reason());
+            case TransferResult.AccountMissing missing ->
+                new EconomyResponse(0, newBalance, EconomyResponse.ResponseType.NOT_IMPLEMENTED, "Account missing: " + missing.which());
+            case TransferResult.InvalidAmount invalid ->
+                new EconomyResponse(0, newBalance, EconomyResponse.ResponseType.FAILURE, invalid.reason());
+        };
     }
 
     // region bank

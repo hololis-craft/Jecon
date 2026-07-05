@@ -120,7 +120,7 @@ public class Jecon extends JavaPlugin {
                 }
             }
         } else {
-            economy.init(main, db, repository);
+            economy.init(main, db, repository, transferService, accountService);
         }
 
         // register events
@@ -172,7 +172,7 @@ public class Jecon extends JavaPlugin {
             return;
         }
 
-        economy = new VaultEconomy(config.getMainConfig(), db, repository);
+        economy = new VaultEconomy(config.getMainConfig(), db, repository, transferService, accountService);
         getServer().getServicesManager().register(Economy.class, economy, this, ServicePriority.Normal);
         getLogger().info("Hooked Vault");
     }
@@ -234,13 +234,14 @@ public class Jecon extends JavaPlugin {
      * {@code system:legacy_sink} を、プラグイン起動時に確実に用意する。
      */
     private void ensureLegacyAccounts() {
-        if (!accountService.exists(SyncRepository.LEGACY_SOURCE_UUID)) {
-            accountService.createAccount(
-                SyncRepository.LEGACY_SOURCE_UUID, SyncRepository.LEGACY_SOURCE_ALIAS, false);
-        }
-        if (!accountService.exists(SyncRepository.LEGACY_SINK_UUID)) {
-            accountService.createAccount(
-                SyncRepository.LEGACY_SINK_UUID, SyncRepository.LEGACY_SINK_ALIAS, false);
+        ensureSystemAccount(SyncRepository.LEGACY_SOURCE_UUID, SyncRepository.LEGACY_SOURCE_ALIAS);
+        ensureSystemAccount(SyncRepository.LEGACY_SINK_UUID, SyncRepository.LEGACY_SINK_ALIAS);
+        ensureSystemAccount(VaultEconomy.VAULT_BRIDGE_UUID, VaultEconomy.VAULT_BRIDGE_ALIAS);
+    }
+
+    private void ensureSystemAccount(java.util.UUID uuid, String alias) {
+        if (!accountService.exists(uuid)) {
+            accountService.createAccount(uuid, alias, false);
         }
     }
 
