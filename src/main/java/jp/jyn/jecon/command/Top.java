@@ -46,11 +46,11 @@ public class Top {
                 Placeholder.unparsed("page", String.valueOf(page))));
 
         int i = offset;
-        for (Database.TopEntry entry : db.topWithNames(ENTRY_PER_PAGE, offset)) {
+        for (Database.TopEntry entry : db.topWithAliases(ENTRY_PER_PAGE, offset)) {
             BigDecimal balance = BigDecimal.valueOf(entry.balance()).scaleByPowerOfTen(-2);
             sender.sendMessage(message.topEntry.toComponent(
                     Placeholder.unparsed("rank", String.valueOf(++i)),
-                    Placeholder.unparsed("name", entry.name() == null ? "Unknown" : entry.name()),
+                    Placeholder.unparsed("name", entry.alias() == null ? "Unknown" : entry.alias()),
                     Placeholder.unparsed("balance", repository.format(balance))));
         }
         return Command.SINGLE_SUCCESS;

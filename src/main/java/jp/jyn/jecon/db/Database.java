@@ -3,6 +3,7 @@ package jp.jyn.jecon.db;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import jp.jyn.jecon.Jecon;
+import jp.jyn.jecon.account.AccountRecord;
 import jp.jyn.jecon.config.MainConfig;
 import jp.jyn.jecon.db.driver.MySQL;
 import jp.jyn.jecon.db.driver.SQLite;
@@ -12,23 +13,19 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.LinkedHashMap;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.UUID;
 import java.util.logging.Logger;
 
 public abstract class Database {
-    public record TopEntry(int id, long balance, String name) {}
-
-    public static final int LOG_DEPOSIT  = 1;
-    public static final int LOG_WITHDRAW = 2;
-    public static final int LOG_SET      = 3;
-    public static final int LOG_CREATE   = 4;
-    public static final int LOG_REMOVE   = 5;
+    public record TopEntry(int id, long balance, String alias) {}
 
     protected final HikariDataSource hikari;
 
@@ -64,11 +61,9 @@ public abstract class Database {
         Database database;
         Logger logger = Jecon.getInstance().getLogger();
         if (config.url.startsWith("jdbc:sqlite:")) {
-            // SQLite
             logger.info("Use SQLite");
             database = new SQLite(new HikariDataSource(hikariConfig));
         } else if (config.url.startsWith("jdbc:mysql:")) {
-            // MySQL
             logger.info("Use MySQL");
             hikariConfig.setUsername(config.username);
             hikariConfig.setPassword(config.password);
@@ -92,47 +87,72 @@ public abstract class Database {
 
     abstract protected void createTable();
 
-    public int getId(UUID uuid) {
-        try (Connection connection = hikari.getConnection()) {
-            connection.setAutoCommit(false);
-            try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT `id` FROM `account` WHERE `uuid`=?"
-            )) {
-                byte[] byteUUID = UUIDBytes.toBytes(uuid);
-                // get id
-                statement.setBytes(1, byteUUID);
-                try (ResultSet resultSet = statement.executeQuery()) {
-                    if (resultSet.next()) {
-                        connection.commit();
-                        return resultSet.getInt(1);
-                    }
-                }
+    // ─── account テーブル ────────────────────────────────────────────
 
-                // insert id
-                try (PreparedStatement insert = connection.prepareStatement(
-                    "INSERT INTO `account` (`uuid`) VALUES (?)"
-                )) {
-                    insert.setBytes(1, byteUUID);
-                    insert.executeUpdate();
+    /**
+     * UUID から account.id を引く。存在しなければ空。
+     */
+    public OptionalInt resolveId(UUID uuid) {
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT `id` FROM `account` WHERE `uuid`=?"
+             )) {
+            statement.setBytes(1, UUIDBytes.toBytes(uuid));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return OptionalInt.of(resultSet.getInt(1));
                 }
-
-                // re get id
-                try (ResultSet resultSet = statement.executeQuery()) {
-                    if (resultSet.next()) {
-                        connection.commit();
-                        return resultSet.getInt(1);
-                    }
-                }
-            } catch (SQLException e) {
-                connection.rollback();
-                throw e;
-            } finally {
-                connection.setAutoCommit(true);
             }
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
-        throw new RuntimeException("The ID could not be issued.");
+        return OptionalInt.empty();
+    }
+
+    /**
+     * UUID から account.id を引き、存在しなければ hex(UUID) の alias で新規作成する。
+     *
+     * <p>フォールバック alias は Minecraft 名を知らないまま legacy コードが呼び出すケース向け。
+     * 実際の名前が判ったら {@link #renameAccount(UUID, String)} で更新する。
+     */
+    public int getOrCreatePlayerId(UUID uuid) {
+        OptionalInt existing = resolveId(uuid);
+        if (existing.isPresent()) {
+            return existing.getAsInt();
+        }
+        String alias = hex(uuid);
+        try {
+            insertAccount(uuid, alias, true, null);
+        } catch (SQLException e) {
+            // 並行挿入で UNIQUE 違反した場合の retry
+            OptionalInt retry = resolveId(uuid);
+            if (retry.isPresent()) {
+                return retry.getAsInt();
+            }
+            throw new RuntimeException(e);
+        }
+        return resolveId(uuid).orElseThrow(() -> new RuntimeException("The ID could not be issued."));
+    }
+
+    /**
+     * account テーブルに新規行を挿入する。UNIQUE 違反 (uuid / alias 重複) は SQLException を投げる。
+     */
+    public void insertAccount(UUID uuid, String alias, boolean isPlayer, String namespace) throws SQLException {
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "INSERT INTO `account` (`uuid`, `alias`, `is_player`, `namespace`, `created_at`) VALUES (?,?,?,?,?)"
+             )) {
+            statement.setBytes(1, UUIDBytes.toBytes(uuid));
+            statement.setString(2, alias);
+            statement.setInt(3, isPlayer ? 1 : 0);
+            if (namespace == null) {
+                statement.setNull(4, java.sql.Types.VARCHAR);
+            } else {
+                statement.setString(4, namespace);
+            }
+            statement.setLong(5, System.currentTimeMillis());
+            statement.executeUpdate();
+        }
     }
 
     public Optional<UUID> getUUID(int id) {
@@ -152,15 +172,15 @@ public abstract class Database {
         return Optional.empty();
     }
 
-    public Optional<String> getCachedName(UUID uuid) {
+    public Optional<String> getAlias(UUID uuid) {
         try (Connection connection = hikari.getConnection();
              PreparedStatement statement = connection.prepareStatement(
-                 "SELECT `name` FROM `account` WHERE `uuid`=?"
+                 "SELECT `alias` FROM `account` WHERE `uuid`=?"
              )) {
             statement.setBytes(1, UUIDBytes.toBytes(uuid));
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (resultSet.next()) {
-                    return Optional.ofNullable(resultSet.getString(1));
+                    return Optional.of(resultSet.getString(1));
                 }
             }
         } catch (SQLException e) {
@@ -169,25 +189,33 @@ public abstract class Database {
         return Optional.empty();
     }
 
-    public void cachePlayerName(UUID uuid, String name) {
+    /**
+     * alias を新しい値へ差し替える。UNIQUE 違反時は false（呼び出し側でハンドリング）。
+     */
+    public boolean renameAccount(UUID uuid, String newAlias) {
         try (Connection connection = hikari.getConnection();
              PreparedStatement statement = connection.prepareStatement(
-                 "UPDATE `account` SET `name`=? WHERE `uuid`=?"
+                 "UPDATE `account` SET `alias`=? WHERE `uuid`=?"
              )) {
-            statement.setString(1, name);
+            statement.setString(1, newAlias);
             statement.setBytes(2, UUIDBytes.toBytes(uuid));
-            statement.executeUpdate();
+            return statement.executeUpdate() != 0;
         } catch (SQLException e) {
+            // UNIQUE 違反等は false で吸収し、致命エラーだけ throw
+            String state = e.getSQLState();
+            if (state != null && (state.startsWith("23") /* integrity constraint */)) {
+                return false;
+            }
             throw new RuntimeException(e);
         }
     }
 
-    public Optional<UUID> findUuidByExactCachedName(String name) {
+    public Optional<UUID> resolveAlias(String alias) {
         try (Connection connection = hikari.getConnection();
              PreparedStatement statement = connection.prepareStatement(
-                 "SELECT `uuid` FROM `account` WHERE `name`=?"
+                 "SELECT `uuid` FROM `account` WHERE `alias`=?"
              )) {
-            statement.setString(1, name);
+            statement.setString(1, alias);
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (resultSet.next()) {
                     return Optional.of(UUIDBytes.fromBytes(resultSet.getBytes(1)));
@@ -199,11 +227,61 @@ public abstract class Database {
         return Optional.empty();
     }
 
-    public List<String> suggestCachedNames(String prefix, int limit) {
+    public Optional<AccountRecord> getAccountByUuid(UUID uuid) {
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT `alias`, `is_player`, `namespace`, `created_at` FROM `account` WHERE `uuid`=?"
+             )) {
+            statement.setBytes(1, UUIDBytes.toBytes(uuid));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return Optional.of(new AccountRecord(
+                        uuid,
+                        resultSet.getString("alias"),
+                        resultSet.getInt("is_player") != 0,
+                        resultSet.getString("namespace"),
+                        Instant.ofEpochMilli(resultSet.getLong("created_at"))
+                    ));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+        return Optional.empty();
+    }
+
+    public List<AccountRecord> listAccountsByNamespace(String namespace, int limit, int offset) {
+        List<AccountRecord> result = new ArrayList<>();
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT `uuid`, `alias`, `is_player`, `created_at` FROM `account`" +
+                     " WHERE `namespace`=? ORDER BY `alias` ASC LIMIT ? OFFSET ?"
+             )) {
+            statement.setString(1, namespace);
+            statement.setInt(2, limit);
+            statement.setInt(3, offset);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    result.add(new AccountRecord(
+                        UUIDBytes.fromBytes(resultSet.getBytes("uuid")),
+                        resultSet.getString("alias"),
+                        resultSet.getInt("is_player") != 0,
+                        namespace,
+                        Instant.ofEpochMilli(resultSet.getLong("created_at"))
+                    ));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+        return result;
+    }
+
+    public List<String> suggestAliases(String prefix, int limit) {
         List<String> result = new ArrayList<>();
         try (Connection connection = hikari.getConnection();
              PreparedStatement statement = connection.prepareStatement(
-                 "SELECT `name` FROM `account` WHERE `name` IS NOT NULL AND `name` LIKE ? ORDER BY `name` ASC LIMIT ?"
+                 "SELECT `alias` FROM `account` WHERE `alias` LIKE ? ORDER BY `alias` ASC LIMIT ?"
              )) {
             statement.setString(1, prefix + "%");
             statement.setInt(2, limit);
@@ -217,6 +295,20 @@ public abstract class Database {
         }
         return result;
     }
+
+    public boolean deleteAccountRow(UUID uuid) {
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "DELETE FROM `account` WHERE `uuid`=?"
+             )) {
+            statement.setBytes(1, UUIDBytes.toBytes(uuid));
+            return statement.executeUpdate() != 0;
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    // ─── balance テーブル ────────────────────────────────────────────
 
     public OptionalLong getBalance(int id) {
         try (Connection connection = hikari.getConnection();
@@ -235,23 +327,20 @@ public abstract class Database {
         return OptionalLong.empty();
     }
 
-    public boolean createAccount(int id, long balance) {
+    public boolean createBalance(int id, long balance) {
         try (Connection connection = hikari.getConnection();
              PreparedStatement statement = connection.prepareStatement(
                  "INSERT INTO `balance` VALUES(?,?)"
              )) {
             statement.setInt(1, id);
             statement.setLong(2, balance);
-            if (statement.executeUpdate() != 0) {
-                return true;
-            }
+            return statement.executeUpdate() != 0;
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
-        return false;
     }
 
-    public boolean removeAccount(int id) {
+    public boolean removeBalance(int id) {
         try (Connection connection = hikari.getConnection();
              PreparedStatement statement = connection.prepareStatement(
                  "DELETE FROM `balance` WHERE `id`=?"
@@ -260,21 +349,6 @@ public abstract class Database {
             return (statement.executeUpdate() != 0);
         } catch (SQLException e) {
             throw new RuntimeException(e);
-        }
-    }
-
-    public void logTransaction(int type, UUID uuid, long amount) {
-        try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "INSERT INTO `transaction_log` (`timestamp`,`type`,`uuid`,`amount`) VALUES (?,?,?,?)"
-             )) {
-            statement.setLong(1, System.currentTimeMillis());
-            statement.setInt(2, type);
-            statement.setBytes(3, UUIDBytes.toBytes(uuid));
-            statement.setLong(4, amount);
-            statement.executeUpdate();
-        } catch (SQLException e) {
-            Jecon.getInstance().getLogger().warning("Failed to log transaction: " + e.getMessage());
         }
     }
 
@@ -306,8 +380,6 @@ public abstract class Database {
 
     public Map<Integer, Long> top(int limit, int offset) {
         Map<Integer, Long> result = new LinkedHashMap<>();
-        // Note: Table full scan will occur
-
         try (Connection connection = hikari.getConnection();
              PreparedStatement statement = connection.prepareStatement(
                  "SELECT `id`,`balance` FROM `balance` ORDER BY `balance` DESC LIMIT ? OFFSET ?"
@@ -325,11 +397,11 @@ public abstract class Database {
         return result;
     }
 
-    public List<TopEntry> topWithNames(int limit, int offset) {
+    public List<TopEntry> topWithAliases(int limit, int offset) {
         List<TopEntry> result = new ArrayList<>();
         try (Connection connection = hikari.getConnection();
              PreparedStatement statement = connection.prepareStatement(
-                 "SELECT `balance`.`id`,`balance`.`balance`,`account`.`name` " +
+                 "SELECT `balance`.`id`,`balance`.`balance`,`account`.`alias` " +
                      "FROM `balance` LEFT JOIN `account` ON `balance`.`id`=`account`.`id` " +
                      "ORDER BY `balance`.`balance` DESC LIMIT ? OFFSET ?"
              )) {
@@ -340,7 +412,7 @@ public abstract class Database {
                     result.add(new TopEntry(
                         resultSet.getInt("id"),
                         resultSet.getLong("balance"),
-                        resultSet.getString("name")
+                        resultSet.getString("alias")
                     ));
                 }
             }
@@ -362,12 +434,23 @@ public abstract class Database {
 
                 try (Statement statement = old.createStatement();
                      PreparedStatement prepare = connection.prepareStatement(
-                         "INSERT INTO `account` VALUES (?,?)"
+                         "INSERT INTO `account` (`id`, `uuid`, `alias`, `is_player`, `namespace`, `created_at`) VALUES (?,?,?,?,?,?)"
                      )) {
-                    try (ResultSet rs = statement.executeQuery("SELECT `id`,`uuid` FROM `account`")) {
+                    try (ResultSet rs = statement.executeQuery(
+                        "SELECT `id`,`uuid`,`alias`,`is_player`,`namespace`,`created_at` FROM `account`"
+                    )) {
                         while (rs.next()) {
                             prepare.setInt(1, rs.getInt("id"));
                             prepare.setBytes(2, rs.getBytes("uuid"));
+                            prepare.setString(3, rs.getString("alias"));
+                            prepare.setInt(4, rs.getInt("is_player"));
+                            String ns = rs.getString("namespace");
+                            if (ns == null) {
+                                prepare.setNull(5, java.sql.Types.VARCHAR);
+                            } else {
+                                prepare.setString(5, ns);
+                            }
+                            prepare.setLong(6, rs.getLong("created_at"));
                             prepare.addBatch();
                         }
                         prepare.executeBatch();
@@ -396,5 +479,15 @@ public abstract class Database {
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static String hex(UUID uuid) {
+        byte[] bytes = UUIDBytes.toBytes(uuid);
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(Character.forDigit((b >> 4) & 0xf, 16));
+            sb.append(Character.forDigit(b & 0xf, 16));
+        }
+        return sb.toString();
     }
 }

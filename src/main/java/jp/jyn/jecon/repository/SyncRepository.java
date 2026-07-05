@@ -28,13 +28,11 @@ public class SyncRepository extends AbstractRepository {
 
     @Override
     protected boolean createAccount(UUID uuid, long balance) {
-        return !hasAccount(uuid) && db.createAccount(getId(uuid), balance);
+        return !hasAccount(uuid) && db.createBalance(getId(uuid), balance);
     }
 
     @Override
     public boolean removeAccount(UUID uuid) {
-        boolean result = db.removeAccount(getId(uuid));
-        if (result) logIfEnabled(Database.LOG_REMOVE, uuid, 0);
-        return result;
+        return db.removeBalance(getId(uuid));
     }
 }

@@ -9,7 +9,6 @@ import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.config.MessageConfig;
-import net.kyori.adventure.text.Component;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -30,7 +29,7 @@ final class CachedPlayerArgument {
     static Optional<Target> resolve(CommandContext<CommandSourceStack> ctx) {
         Jecon plugin = Jecon.getInstance();
         String input = StringArgumentType.getString(ctx, "player");
-        return plugin.getDb().findUuidByExactCachedName(input)
+        return plugin.getDb().resolveAlias(input)
                 .map(uuid -> new Target(uuid, input));
     }
 
@@ -42,7 +41,7 @@ final class CachedPlayerArgument {
 
     private static CompletableFuture<Suggestions> suggest(Jecon plugin, SuggestionsBuilder builder) {
         String remaining = builder.getRemaining();
-        plugin.getDb().suggestCachedNames(remaining, SUGGESTION_LIMIT).forEach(builder::suggest);
+        plugin.getDb().suggestAliases(remaining, SUGGESTION_LIMIT).forEach(builder::suggest);
         return builder.buildFuture();
     }
 

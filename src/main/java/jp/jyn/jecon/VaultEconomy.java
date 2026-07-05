@@ -73,7 +73,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public boolean hasAccount(String s) {
-        return db.findUuidByExactCachedName(s).map(repository::hasAccount).orElse(false);
+        return db.resolveAlias(s).map(repository::hasAccount).orElse(false);
     }
 
     @Override
@@ -93,7 +93,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public double getBalance(String s) {
-        return db.findUuidByExactCachedName(s)
+        return db.resolveAlias(s)
             .map(repository::getDouble)
             .orElse(OptionalDouble.empty())
             .orElse(0);
@@ -116,7 +116,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public boolean has(String s, double v) {
-        return db.findUuidByExactCachedName(s).map(uuid -> repository.has(uuid, v)).orElse(false);
+        return db.resolveAlias(s).map(uuid -> repository.has(uuid, v)).orElse(false);
     }
 
     @Override
@@ -136,7 +136,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public boolean createPlayerAccount(String s) {
-        return db.findUuidByExactCachedName(s).map(uuid -> repository.createAccount(uuid, defaultBalance)).orElse(false);
+        return db.resolveAlias(s).map(uuid -> repository.createAccount(uuid, defaultBalance)).orElse(false);
     }
 
     @Override
@@ -168,7 +168,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public EconomyResponse withdrawPlayer(String s, double v) {
-        return db.findUuidByExactCachedName(s)
+        return db.resolveAlias(s)
             .map(uuid -> withdrawPlayer(uuid, v))
             .orElseGet(() -> new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "User does not exist"));
     }
@@ -202,7 +202,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public EconomyResponse depositPlayer(String s, double v) {
-        return db.findUuidByExactCachedName(s)
+        return db.resolveAlias(s)
             .map(uuid -> depositPlayer(uuid, v))
             .orElseGet(() -> new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "User does not exist"));
     }

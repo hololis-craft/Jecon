@@ -25,14 +25,12 @@ public abstract class AbstractRepository implements BalanceRepository {
     private final MainConfig.FormatConfig formatConfig;
     private final LongFunction<String> minorFormat;
     private final Map<UUID, Integer> uuidToIdCache;
-    private final boolean transactionLog;
 
     protected AbstractRepository(MainConfig config, Database db) {
         this.db = db;
         formatConfig = config.format;
 
         uuidToIdCache = new HashMap<>();
-        transactionLog = config.transactionLog;
 
         switch (formatConfig.minorType) {
             case OMIT:
@@ -91,14 +89,8 @@ public abstract class AbstractRepository implements BalanceRepository {
         }
     }
 
-    protected final void logIfEnabled(int type, UUID uuid, long amount) {
-        if (transactionLog) {
-            db.logTransaction(type, uuid, amount);
-        }
-    }
-
     protected final Integer getId(UUID uuid) {
-        return uuidToIdCache.computeIfAbsent(uuid, db::getId);
+        return uuidToIdCache.computeIfAbsent(uuid, db::getOrCreatePlayerId);
     }
 
     @Override
@@ -148,7 +140,6 @@ public abstract class AbstractRepository implements BalanceRepository {
     public final boolean set(UUID uuid, double balance) {
         long raw = double2long(balance);
         boolean result = set(uuid, raw);
-        if (result) logIfEnabled(Database.LOG_SET, uuid, raw);
         return result;
     }
 
@@ -156,7 +147,6 @@ public abstract class AbstractRepository implements BalanceRepository {
     public final boolean set(UUID uuid, BigDecimal balance) {
         long raw = decimal2long(balance);
         boolean result = set(uuid, raw);
-        if (result) logIfEnabled(Database.LOG_SET, uuid, raw);
         return result;
     }
 
@@ -184,7 +174,6 @@ public abstract class AbstractRepository implements BalanceRepository {
     public final boolean deposit(UUID uuid, double amount) {
         long raw = double2long(amount);
         boolean result = this.deposit(uuid, raw);
-        if (result) logIfEnabled(Database.LOG_DEPOSIT, uuid, raw);
         return result;
     }
 
@@ -192,7 +181,6 @@ public abstract class AbstractRepository implements BalanceRepository {
     public final boolean deposit(UUID uuid, BigDecimal amount) {
         long raw = decimal2long(amount);
         boolean result = this.deposit(uuid, raw);
-        if (result) logIfEnabled(Database.LOG_DEPOSIT, uuid, raw);
         return result;
     }
 
@@ -204,7 +192,6 @@ public abstract class AbstractRepository implements BalanceRepository {
     public final boolean withdraw(UUID uuid, double amount) {
         long raw = double2long(amount);
         boolean result = this.withdraw(uuid, raw);
-        if (result) logIfEnabled(Database.LOG_WITHDRAW, uuid, raw);
         return result;
     }
 
@@ -212,7 +199,6 @@ public abstract class AbstractRepository implements BalanceRepository {
     public final boolean withdraw(UUID uuid, BigDecimal amount) {
         long raw = decimal2long(amount);
         boolean result = this.withdraw(uuid, raw);
-        if (result) logIfEnabled(Database.LOG_WITHDRAW, uuid, raw);
         return result;
     }
 
@@ -226,14 +212,12 @@ public abstract class AbstractRepository implements BalanceRepository {
     public final boolean createAccount(UUID uuid, double balance) {
         long raw = double2long(balance);
         boolean result = createAccount(uuid, raw);
-        if (result) logIfEnabled(Database.LOG_CREATE, uuid, raw);
         return result;
     }
 
     public final boolean createAccount(UUID uuid, BigDecimal balance) {
         long raw = decimal2long(balance);
         boolean result = createAccount(uuid, raw);
-        if (result) logIfEnabled(Database.LOG_CREATE, uuid, raw);
         return result;
     }
 

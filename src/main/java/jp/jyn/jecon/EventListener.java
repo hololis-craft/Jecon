@@ -28,8 +28,9 @@ class EventListener implements Listener {
     @EventHandler(ignoreCancelled = true)
     public void onPlayerJoin(PlayerJoinEvent e) {
         Player player = e.getPlayer();
-        plugin.getDb().getId(player.getUniqueId());
-        plugin.getDb().cachePlayerName(player.getUniqueId(), player.getName());
+        plugin.getDb().getOrCreatePlayerId(player.getUniqueId());
+        // Minecraft 名を alias として反映（重複時は暫定 hex-uuid のまま維持）
+        plugin.getDb().renameAccount(player.getUniqueId(), player.getName());
 
         if (createAccountOnJoin) {
             repository.createAccount(player.getUniqueId(), defaultBalance);
