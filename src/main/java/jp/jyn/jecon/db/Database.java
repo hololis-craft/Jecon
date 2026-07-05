@@ -308,6 +308,132 @@ public abstract class Database {
         }
     }
 
+    // ─── transaction helpers ─────────────────────────────────────────
+
+    /**
+     * 単一トランザクション内で複数の書き込みを行う。auto-commit を切り替え、例外時に rollback する。
+     */
+    public void runInTransaction(TxWork work) {
+        try (Connection connection = hikari.getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                work.run(connection);
+                connection.commit();
+            } catch (RuntimeException e) {
+                connection.rollback();
+                throw e;
+            } catch (SQLException e) {
+                connection.rollback();
+                throw new RuntimeException(e);
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @FunctionalInterface
+    public interface TxWork {
+        void run(Connection connection) throws SQLException;
+    }
+
+    /**
+     * FOR UPDATE で残高行をロックし、値を返す。MySQL では実際に行ロックが取得される。
+     * SQLite では BEGIN IMMEDIATE 相当により database-level lock で保護されているため、
+     * FOR UPDATE 句が無くても安全な同期が取れる。
+     */
+    public OptionalLong selectBalanceForUpdate(Connection connection, int id) throws SQLException {
+        String sql = supportsSelectForUpdate()
+            ? "SELECT `balance` FROM `balance` WHERE `id`=? FOR UPDATE"
+            : "SELECT `balance` FROM `balance` WHERE `id`=?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, id);
+            try (ResultSet rs = statement.executeQuery()) {
+                if (rs.next()) {
+                    return OptionalLong.of(rs.getLong(1));
+                }
+            }
+        }
+        return OptionalLong.empty();
+    }
+
+    /**
+     * トランザクション内の残高上書き。存在しない行は INSERT する（0 balance の口座に対する
+     * 最初の書き込みで自動作成）。
+     */
+    public void setBalanceInTx(Connection connection, int id, long balance) throws SQLException {
+        try (PreparedStatement update = connection.prepareStatement(
+            "UPDATE `balance` SET `balance`=? WHERE `id`=?"
+        )) {
+            update.setLong(1, balance);
+            update.setInt(2, id);
+            if (update.executeUpdate() == 0) {
+                try (PreparedStatement insert = connection.prepareStatement(
+                    "INSERT INTO `balance` (`id`, `balance`) VALUES (?, ?)"
+                )) {
+                    insert.setInt(1, id);
+                    insert.setLong(2, balance);
+                    insert.executeUpdate();
+                }
+            }
+        }
+    }
+
+    /**
+     * transaction_log に 1 行 INSERT し、生成された id を返す。
+     */
+    public long insertTransactionLog(Connection connection, Instant occurredAt, String source,
+                                     Integer fromId, Integer toId, long amount, String legLabel,
+                                     Long batchId, UUID actorUuid, String metadataJson) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "INSERT INTO `transaction_log` " +
+                "(`occurred_at`, `source`, `from_id`, `to_id`, `amount`, `leg_label`, `batch_id`, `actor_uuid`, `metadata`)" +
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+            Statement.RETURN_GENERATED_KEYS
+        )) {
+            setOccurredAt(statement, 1, occurredAt);
+            statement.setString(2, source);
+            if (fromId == null) statement.setNull(3, java.sql.Types.INTEGER); else statement.setInt(3, fromId);
+            if (toId == null) statement.setNull(4, java.sql.Types.INTEGER); else statement.setInt(4, toId);
+            statement.setLong(5, amount);
+            statement.setString(6, legLabel);
+            if (batchId == null) statement.setNull(7, java.sql.Types.BIGINT); else statement.setLong(7, batchId);
+            if (actorUuid == null) statement.setNull(8, java.sql.Types.BINARY); else statement.setBytes(8, UUIDBytes.toBytes(actorUuid));
+            if (metadataJson == null) statement.setNull(9, java.sql.Types.VARCHAR); else statement.setString(9, metadataJson);
+            statement.executeUpdate();
+            try (ResultSet keys = statement.getGeneratedKeys()) {
+                if (keys.next()) {
+                    return keys.getLong(1);
+                }
+            }
+        }
+        return -1L;
+    }
+
+    /**
+     * transaction_log の batch_id を後付けする。単一 leg の場合は自身の id を batch_id にする用途。
+     */
+    public void updateTransactionLogBatchId(Connection connection, long transferId, long batchId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "UPDATE `transaction_log` SET `batch_id`=? WHERE `id`=?"
+        )) {
+            statement.setLong(1, batchId);
+            statement.setLong(2, transferId);
+            statement.executeUpdate();
+        }
+    }
+
+    protected void setOccurredAt(PreparedStatement statement, int index, Instant occurredAt) throws SQLException {
+        // デフォルトは epoch millis (SQLite 用)。MySQL は setTimestamp にオーバーライドする。
+        statement.setLong(index, occurredAt.toEpochMilli());
+    }
+
+    /** MySQL は FOR UPDATE を発行、SQLite は発行しない（database-level lock で十分）。 */
+    protected boolean supportsSelectForUpdate() {
+        return true;
+    }
+
     // ─── account_member テーブル ─────────────────────────────────────
 
     public int getMemberPermissions(int accountId, UUID member) {

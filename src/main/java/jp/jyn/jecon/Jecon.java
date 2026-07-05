@@ -24,9 +24,13 @@ import jp.jyn.jecon.config.MainConfig;
 import jp.jyn.jecon.db.Database;
 import jp.jyn.jecon.event.JeconAccountCreatedEvent;
 import jp.jyn.jecon.event.JeconAccountRemovedEvent;
+import jp.jyn.jecon.modifier.ModifierRegistry;
+import jp.jyn.jecon.modifier.ModifierRegistryImpl;
 import jp.jyn.jecon.repository.BalanceRepository;
 import jp.jyn.jecon.repository.SyncRepository;
 import jp.jyn.jecon.services.JeconServices;
+import jp.jyn.jecon.transfer.TransferService;
+import jp.jyn.jecon.transfer.TransferServiceImpl;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.HandlerList;
@@ -49,6 +53,8 @@ public class Jecon extends JavaPlugin {
     private BalanceRepository repository;
     private VaultEconomy economy;
     private AccountService accountService;
+    private TransferService transferService;
+    private ModifierRegistry modifierRegistry;
     private final JeconServices services = new JeconServices();
 
     // Fields elevated for cross-reload access
@@ -81,11 +87,20 @@ public class Jecon extends JavaPlugin {
 
         // AccountService (ADR-0011 / ADR-0013)
         accountService = new AccountServiceImpl(db, new AccountLifecycleAdapter());
+
+        // Modifier registry と TransferService (ADR-0004 / 03-transfer-api.md / 05-modifier-pipeline.md)
+        modifierRegistry = new ModifierRegistryImpl();
+        transferService = new TransferServiceImpl(this, db, accountService, modifierRegistry);
+
         services.register(AccountService.class, accountService);
         services.register(BalanceRepository.class, repository);
+        services.register(TransferService.class, transferService);
+        services.register(ModifierRegistry.class, modifierRegistry);
         destructor.addFirst(() -> {
             services.clear();
             accountService = null;
+            transferService = null;
+            modifierRegistry = null;
         });
 
         // register vault
@@ -198,6 +213,14 @@ public class Jecon extends JavaPlugin {
 
     public AccountService getAccountService() {
         return accountService;
+    }
+
+    public TransferService getTransferService() {
+        return transferService;
+    }
+
+    public ModifierRegistry getModifierRegistry() {
+        return modifierRegistry;
     }
 
     private class AccountLifecycleAdapter implements AccountServiceImpl.AccountLifecycleObserver {

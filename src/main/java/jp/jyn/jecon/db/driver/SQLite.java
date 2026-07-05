@@ -20,6 +20,11 @@ public class SQLite extends Database {
     }
 
     @Override
+    protected boolean supportsSelectForUpdate() {
+        return false;
+    }
+
+    @Override
     protected void createTable() {
         try (Connection connection = hikari.getConnection();
              Statement statement = connection.createStatement()) {

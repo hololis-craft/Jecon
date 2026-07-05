@@ -10,6 +10,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.logging.Logger;
@@ -17,6 +19,11 @@ import java.util.logging.Logger;
 public class MySQL extends Database {
     public MySQL(HikariDataSource hikari) {
         super(hikari);
+    }
+
+    @Override
+    protected void setOccurredAt(PreparedStatement statement, int index, Instant occurredAt) throws SQLException {
+        statement.setTimestamp(index, Timestamp.from(occurredAt));
     }
 
     @Override
