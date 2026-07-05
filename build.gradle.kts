@@ -74,7 +74,7 @@ publishing {
     publications {
         create<MavenPublication>("lib") {
             groupId    = project.group.toString()
-            artifactId = "Jecon"
+            artifactId = "jecon"
             version    = project.version.toString()
             artifact(libJar)
             artifact(tasks.named("javadocJar"))
