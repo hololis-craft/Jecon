@@ -8,6 +8,7 @@ import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import jp.jyn.jecon.account.Account;
 import jp.jyn.jecon.account.AccountService;
 import jp.jyn.jecon.account.AccountServiceImpl;
+import jp.jyn.jecon.command.AccountCommand;
 import jp.jyn.jecon.command.Convert;
 import jp.jyn.jecon.command.Create;
 import jp.jyn.jecon.command.Give;
@@ -165,6 +166,7 @@ public class Jecon extends JavaPlugin {
         Convert convert = new Convert(this, config);
         Reload reload = new Reload(this, config);
         Version version = new Version(this, config);
+        AccountCommand account = new AccountCommand(this, config);
 
         return Commands.literal("jecon")
                 .requires(s -> s.getSender().hasPermission("jecon.show"))
@@ -179,7 +181,8 @@ public class Jecon extends JavaPlugin {
                 .then(top.create())
                 .then(convert.create())
                 .then(reload.create())
-                .then(version.create());
+                .then(version.create())
+                .then(account.create());
     }
 
     private void vaultHook() {

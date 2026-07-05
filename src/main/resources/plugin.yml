@@ -23,6 +23,8 @@ permissions:
       jecon.convert: true
       jecon.reload: true
       jecon.version: true
+      jecon.account: true
+      jecon.transfer.overdraft: true
   jecon.user:
     children:
       jecon.show: true
@@ -39,6 +41,8 @@ permissions:
       jecon.convert: true
       jecon.reload: true
       jecon.version: true
+      jecon.account: true
+      jecon.transfer.overdraft: true
   jecon.show:
     default: true
   jecon.pay:
@@ -63,3 +67,9 @@ permissions:
     default: op
   jecon.version:
     default: op
+  jecon.account:
+    default: op
+    description: "Base permission for /jecon account subcommands (grant per-namespace via jecon.account.namespace.<namespace>.create / .transfer)"
+  jecon.transfer.overdraft:
+    default: op
+    description: "Allow --overdraft on /jecon account send"
