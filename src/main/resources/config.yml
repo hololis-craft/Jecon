@@ -1,12 +1,6 @@
 defaultBalance: 10000.0
 createAccountOnJoin: true
 
-# lazyWrite reduces database writes and improves performance.
-# However, if you have multiple servers sharing the database (eg BungeeCord), players balance may be temporarily inaccurate.
-# The cache-coherency algorithm ensures that the balance will eventually be correct.
-# If you need to keep players balance always accurate, disable this feature.
-lazyWrite: true
-
 # Transaction logging: record all balance changes to transaction_log table.
 transactionLog: true
 
@@ -67,4 +61,4 @@ database:
     idleTimeout: -1
 
 # Don't touch
-version: 4
+version: 5

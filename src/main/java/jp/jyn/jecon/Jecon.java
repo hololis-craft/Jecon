@@ -20,7 +20,6 @@ import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MainConfig;
 import jp.jyn.jecon.db.Database;
 import jp.jyn.jecon.repository.BalanceRepository;
-import jp.jyn.jecon.repository.LazyRepository;
 import jp.jyn.jecon.repository.SyncRepository;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.event.EventHandler;
@@ -34,8 +33,6 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
-import java.util.UUID;
-import java.util.function.Consumer;
 
 @SuppressWarnings("UnstableApiUsage")
 public class Jecon extends JavaPlugin {
@@ -47,7 +44,6 @@ public class Jecon extends JavaPlugin {
 
     // Fields elevated for cross-reload access
     private Database db;
-    private Runnable saveAll;
 
     // Stack(LIFO)
     private final Deque<Runnable> destructor = new ArrayDeque<>();
@@ -70,31 +66,9 @@ public class Jecon extends JavaPlugin {
         db = Database.connect(main.database);
         destructor.addFirst(db::close);
 
-        // methods for internal use
-        Consumer<UUID> consistency;
-        Consumer<UUID> save;
-        // init repository
-        if (main.lazyWrite) {
-            LazyRepository lazy = new LazyRepository(main, db);
-            repository = lazy;
-
-            consistency = lazy::consistency;
-            save = lazy::save;
-            saveAll = lazy::saveAll;
-        } else {
-            repository = new SyncRepository(main, db);
-
-            consistency = u -> {
-            };
-            save = u -> {
-            };
-            saveAll = () -> {
-            };
-        }
-        destructor.addFirst(() -> {
-            saveAll.run();
-            repository = null;
-        });
+        // init repository (Sync only per ADR-0012)
+        repository = new SyncRepository(main, db);
+        destructor.addFirst(() -> repository = null);
 
         // register vault
         if (economy == null) {
@@ -112,7 +86,7 @@ public class Jecon extends JavaPlugin {
 
         // register events
         getServer().getPluginManager().registerEvents(
-                new EventListener(this, main, repository, consistency, save), this);
+                new EventListener(this, main, repository), this);
         destructor.addFirst(() -> HandlerList.unregisterAll(this));
 
         // register commands via Brigadier (only once per plugin lifecycle)
@@ -191,10 +165,6 @@ public class Jecon extends JavaPlugin {
 
     public Database getDb() {
         return db;
-    }
-
-    public Runnable getSaveAll() {
-        return saveAll;
     }
 
     public ConfigLoader getConfigLoader() {

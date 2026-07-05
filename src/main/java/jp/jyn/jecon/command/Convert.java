@@ -81,9 +81,6 @@ public class Convert {
         sender.sendMessage(Component.text("Connect to database."));
         Database db = Database.connect(config.getMainConfig().database);
 
-        sender.sendMessage(Component.text("Saving unsaved data."));
-        plugin.getSaveAll().run();
-
         sender.sendMessage(Component.text("Converting..."));
         db.convert(oldDB);
         sender.sendMessage(Component.text("Converted."));

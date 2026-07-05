@@ -6,11 +6,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.math.BigDecimal;
-import java.util.UUID;
-import java.util.function.Consumer;
 
 @SuppressWarnings("unused")
 class EventListener implements Listener {
@@ -20,18 +17,12 @@ class EventListener implements Listener {
 
     private final BalanceRepository repository;
 
-    private final Consumer<UUID> consistency;
-    private final Consumer<UUID> save;
-
-    EventListener(Jecon plugin, MainConfig config, BalanceRepository repository,
-                  Consumer<UUID> consistency, Consumer<UUID> save) {
+    EventListener(Jecon plugin, MainConfig config, BalanceRepository repository) {
         this.plugin = plugin;
         this.createAccountOnJoin = config.createAccountOnJoin;
         this.defaultBalance = config.defaultBalance;
 
         this.repository = repository;
-        this.consistency = consistency;
-        this.save = save;
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -40,16 +31,8 @@ class EventListener implements Listener {
         plugin.getDb().getId(player.getUniqueId());
         plugin.getDb().cachePlayerName(player.getUniqueId(), player.getName());
 
-        // ログイン時に一貫性チェック
-        consistency.accept(player.getUniqueId());
-
         if (createAccountOnJoin) {
             repository.createAccount(player.getUniqueId(), defaultBalance);
         }
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onPlayerQuit(PlayerQuitEvent e) {
-        save.accept(e.getPlayer().getUniqueId());
     }
 }

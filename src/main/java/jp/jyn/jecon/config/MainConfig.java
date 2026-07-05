@@ -12,7 +12,6 @@ public class MainConfig {
     public final BigDecimal defaultBalance;
     public final boolean createAccountOnJoin;
 
-    public final boolean lazyWrite;
     public final boolean transactionLog;
     public final FormatConfig format;
     public final DatabaseConfig database;
@@ -21,7 +20,6 @@ public class MainConfig {
         defaultBalance = new BigDecimal(config.getString("defaultBalance"));
         createAccountOnJoin = config.getBoolean("createAccountOnJoin");
 
-        lazyWrite = config.getBoolean("lazyWrite");
         transactionLog = config.getBoolean("transactionLog", false);
 
         format = new FormatConfig(config.getConfigurationSection("format"));

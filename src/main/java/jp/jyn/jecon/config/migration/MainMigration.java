@@ -7,7 +7,7 @@ import java.util.logging.Logger;
 
 public class MainMigration {
     private final static String FILE = "config.yml";
-    private final static int CURRENT_VERSION = 4;
+    private final static int CURRENT_VERSION = 5;
 
     private MainMigration() {}
 
@@ -29,6 +29,8 @@ public class MainMigration {
                 v2to3(config);
             case 3:
                 v3to4(config);
+            case 4:
+                v4to5(config);
                 break;
             default:
                 logger.severe(MigrationUtils.ERROR_1);
@@ -86,6 +88,12 @@ public class MainMigration {
     private static void v3to4(ConfigurationSection config) {
         config.set("format.minorType", "asis");
         config.set("version", 4);
+    }
+
+    private static void v4to5(ConfigurationSection config) {
+        // ADR-0012: LazyRepository is removed, always Sync
+        config.set("lazyWrite", null);
+        config.set("version", 5);
     }
 
     @SuppressWarnings("SpellCheckingInspection")
