@@ -1,6 +1,12 @@
 defaultBalance: 10000.0
 createAccountOnJoin: true
 
+# Message locale. (en/ja)
+# Loads message_<locale>.yml from the plugin folder.
+# If message.yml exists in the plugin folder (from a legacy install
+# or manual customization), that file takes priority instead.
+locale: en
+
 # Transaction logging: record all balance changes to transaction_log table.
 transactionLog: true
 
@@ -61,4 +67,4 @@ database:
     idleTimeout: -1
 
 # Don't touch
-version: 5
+version: 6

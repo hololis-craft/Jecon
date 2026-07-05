@@ -54,29 +54,7 @@ help:
 
 # //*<!-- syntax -->*/
 # MiniMessage format: https://docs.advntr.dev/minimessage/format.html
-# <black>       -> Black (#000000)
-# <dark_blue>   -> Dark Blue (#0000AA)
-# <dark_green>  -> Dark Green (#00AA00)
-# <dark_aqua>   -> Dark Aqua (#00AAAA)
-# <dark_red>    -> Dark Red (#AA0000)
-# <dark_purple> -> Purple (#AA00AA)
-# <gold>        -> Gold (#FFAA00)
-# <gray>        -> Gray (#AAAAAA)
-# <dark_gray>   -> Dark Gray (#555555)
-# <blue>        -> Blue (#5555FF)
-# <green>       -> Green (#55FF55)
-# <aqua>        -> Aqua (#55FFFF)
-# <red>         -> Red (#FF5555)
-# <light_purple>-> Light Purple (#FF55FF)
-# <yellow>      -> Yellow (#FFFF55)
-# <white>       -> White (#FFFFFF)
-# <bold>        -> Bold
-# <italic>      -> Italic
-# <underlined>  -> Underline
-# <strikethrough> -> Strikethrough
-# <obfuscated>  -> Obfuscated
-# <reset>       -> Reset
-# <name>        -> variable placeholder
+# See message.yml for the tag reference.
 
 # Don't touch
 version: 3

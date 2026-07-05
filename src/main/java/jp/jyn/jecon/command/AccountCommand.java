@@ -12,10 +12,13 @@ import jp.jyn.jecon.account.Account;
 import jp.jyn.jecon.account.AccountService;
 import jp.jyn.jecon.account.Aliases;
 import jp.jyn.jecon.config.ConfigLoader;
+import jp.jyn.jecon.config.MessageConfig;
+import jp.jyn.jecon.repository.BalanceRepository;
 import jp.jyn.jecon.transfer.TransferContext;
 import jp.jyn.jecon.transfer.TransferResult;
 import jp.jyn.jecon.transfer.TransferService;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
@@ -39,7 +42,6 @@ public class AccountCommand {
     private static final int LIST_PAGE_SIZE = 20;
 
     private final Jecon plugin;
-    @SuppressWarnings("unused")
     private final ConfigLoader config;
 
     public AccountCommand(Jecon plugin, ConfigLoader config) {
@@ -69,6 +71,7 @@ public class AccountCommand {
 
     private int executeCreate(CommandContext<CommandSourceStack> ctx, BigDecimal initial) {
         CommandSender sender = ctx.getSource().getSender();
+        MessageConfig.AccountMessage message = config.getMessageConfig().account;
         String alias = StringArgumentType.getString(ctx, "alias");
 
         String normalized;
@@ -77,60 +80,66 @@ public class AccountCommand {
             normalized = Aliases.normalizeNonPlayer(alias);
             namespace = Aliases.namespaceOf(normalized);
         } catch (IllegalArgumentException e) {
-            sender.sendMessage(Component.text("Invalid alias: " + e.getMessage()));
+            sender.sendMessage(message.invalidAlias.toComponent("reason", e.getMessage()));
             return Command.SINGLE_SUCCESS;
         }
 
         if (!sender.hasPermission("jecon.account.namespace." + namespace + ".create")) {
-            sender.sendMessage(Component.text("You do not have permission to create '" + namespace + "' accounts."));
+            sender.sendMessage(message.createDenied.toComponent("namespace", namespace));
             return Command.SINGLE_SUCCESS;
         }
 
         AccountService accountService = plugin.getAccountService();
         UUID uuid = Aliases.uuidFromAlias(normalized);
         if (accountService.exists(uuid)) {
-            sender.sendMessage(Component.text("Account already exists: " + normalized));
+            sender.sendMessage(message.createExists.toComponent("name", normalized));
             return Command.SINGLE_SUCCESS;
         }
 
         try {
             accountService.createAccount(uuid, normalized, false);
         } catch (RuntimeException e) {
-            sender.sendMessage(Component.text("Failed to create account: " + e.getMessage()));
+            sender.sendMessage(message.createFailed.toComponent("reason", e.getMessage()));
             return Command.SINGLE_SUCCESS;
         }
 
-        // 初期残高
-        if (initial.signum() > 0) {
-            plugin.getRepository().createAccount(uuid, initial);
-        } else {
-            plugin.getRepository().createAccount(uuid, BigDecimal.ZERO);
-        }
+        BalanceRepository repository = plugin.getRepository();
+        BigDecimal initialBalance = initial.signum() > 0 ? initial : BigDecimal.ZERO;
+        repository.createAccount(uuid, initialBalance);
 
-        sender.sendMessage(Component.text("Created account: " + normalized + " (uuid=" + uuid + ")"));
+        sender.sendMessage(message.createSuccess.toComponent(
+            Placeholder.unparsed("name", normalized),
+            Placeholder.unparsed("uuid", uuid.toString()),
+            Placeholder.unparsed("balance", repository.format(initialBalance))));
         return Command.SINGLE_SUCCESS;
     }
 
     private int executeList(CommandContext<CommandSourceStack> ctx) {
         CommandSender sender = ctx.getSource().getSender();
+        MessageConfig.AccountMessage message = config.getMessageConfig().account;
         String namespace = StringArgumentType.getString(ctx, "namespace").toLowerCase(java.util.Locale.ROOT);
 
         AccountService accountService = plugin.getAccountService();
         List<Account> accounts = accountService.listByNamespace(namespace, LIST_PAGE_SIZE, 0);
         if (accounts.isEmpty()) {
-            sender.sendMessage(Component.text("No accounts in namespace: " + namespace));
+            sender.sendMessage(message.listEmpty.toComponent("namespace", namespace));
             return Command.SINGLE_SUCCESS;
         }
-        sender.sendMessage(Component.text("Accounts in '" + namespace + "':"));
+
+        BalanceRepository repository = plugin.getRepository();
+        sender.sendMessage(message.listHeader.toComponent("namespace", namespace));
         for (Account a : accounts) {
-            BigDecimal balance = plugin.getRepository().getDecimal(a.uuid()).orElse(BigDecimal.ZERO);
-            sender.sendMessage(Component.text("  " + a.alias() + " = " + balance));
+            BigDecimal balance = repository.getDecimal(a.uuid()).orElse(BigDecimal.ZERO);
+            sender.sendMessage(message.listEntry.toComponent(
+                Placeholder.unparsed("name", a.alias()),
+                Placeholder.unparsed("balance", repository.format(balance))));
         }
         return Command.SINGLE_SUCCESS;
     }
 
     private int executeSend(CommandContext<CommandSourceStack> ctx) {
         CommandSender sender = ctx.getSource().getSender();
+        MessageConfig.AccountMessage message = config.getMessageConfig().account;
         String fromArg = StringArgumentType.getString(ctx, "from");
         String toArg = StringArgumentType.getString(ctx, "to");
         double amount = DoubleArgumentType.getDouble(ctx, "amount");
@@ -138,11 +147,11 @@ public class AccountCommand {
         Optional<UUID> from = resolveAccount(fromArg);
         Optional<UUID> to = resolveAccount(toArg);
         if (from.isEmpty()) {
-            sender.sendMessage(Component.text("Unknown source: " + fromArg));
+            sender.sendMessage(message.unknownSource.toComponent("name", fromArg));
             return Command.SINGLE_SUCCESS;
         }
         if (to.isEmpty()) {
-            sender.sendMessage(Component.text("Unknown destination: " + toArg));
+            sender.sendMessage(message.unknownDestination.toComponent("name", toArg));
             return Command.SINGLE_SUCCESS;
         }
 
@@ -150,7 +159,7 @@ public class AccountCommand {
         String fromNamespace = namespaceOfAlias(fromArg);
         if (fromNamespace != null
             && !sender.hasPermission("jecon.account.namespace." + fromNamespace + ".transfer")) {
-            sender.sendMessage(Component.text("You do not have permission to send from '" + fromNamespace + "' accounts."));
+            sender.sendMessage(message.sendDenied.toComponent("namespace", fromNamespace));
             return Command.SINGLE_SUCCESS;
         }
 
@@ -167,7 +176,7 @@ public class AccountCommand {
         }
 
         TransferResult result = transferService.transfer(from.get(), to.get(), decimal, builder.build());
-        sender.sendMessage(Component.text(describeResult(result, fromArg, toArg, decimal)));
+        sender.sendMessage(renderResult(message, result, fromArg, toArg, decimal));
         return Command.SINGLE_SUCCESS;
     }
 
@@ -192,13 +201,29 @@ public class AccountCommand {
         }
     }
 
-    private static String describeResult(TransferResult result, String from, String to, BigDecimal amount) {
+    private Component renderResult(MessageConfig.AccountMessage message,
+                                   TransferResult result,
+                                   String from,
+                                   String to,
+                                   BigDecimal amount) {
+        BalanceRepository repository = plugin.getRepository();
         return switch (result) {
-            case TransferResult.Success s -> "Sent " + amount + " from " + from + " to " + to + " (id=" + s.transferId() + ")";
-            case TransferResult.InsufficientFunds f -> "Insufficient funds in " + from + " (available=" + f.available() + ", required=" + f.required() + ")";
-            case TransferResult.Vetoed v -> "Vetoed by modifier '" + v.modifierId() + "': " + v.reason();
-            case TransferResult.AccountMissing m -> "Account missing: " + m.which();
-            case TransferResult.InvalidAmount ia -> "Invalid amount: " + ia.reason();
+            case TransferResult.Success s -> message.sendSuccess.toComponent(
+                Placeholder.unparsed("amount", repository.format(amount)),
+                Placeholder.unparsed("from", from),
+                Placeholder.unparsed("to", to),
+                Placeholder.unparsed("id", String.valueOf(s.transferId())));
+            case TransferResult.InsufficientFunds f -> message.sendInsufficient.toComponent(
+                Placeholder.unparsed("from", from),
+                Placeholder.unparsed("available", repository.format(f.available())),
+                Placeholder.unparsed("required", repository.format(f.required())));
+            case TransferResult.Vetoed v -> message.sendVetoed.toComponent(
+                Placeholder.unparsed("modifier", v.modifierId()),
+                Placeholder.unparsed("reason", v.reason()));
+            case TransferResult.AccountMissing m -> message.sendAccountMissing.toComponent(
+                "which", m.which().toString());
+            case TransferResult.InvalidAmount ia -> message.sendInvalidAmount.toComponent(
+                "reason", ia.reason());
         };
     }
 }

@@ -7,7 +7,7 @@ import java.util.logging.Logger;
 
 public class MessageMigration {
     private final static String FILE = "message.yml";
-    private final static int CURRENT_VERSION = 2;
+    private final static int CURRENT_VERSION = 3;
 
     private MessageMigration() {}
 
@@ -22,12 +22,16 @@ public class MessageMigration {
 
         MigrationUtils.copy(FILE, "message.old.yml");
 
-        if (version == 1) {
-            v1to2(config);
-        } else {
-            logger.severe(MigrationUtils.ERROR_1);
-            logger.severe(String.format(MigrationUtils.ERROR_2, FILE));
-            throw new IllegalStateException(String.format(MigrationUtils.EXCEPTION, FILE, version));
+        switch (version) {
+            case 1:
+                v1to2(config);
+            case 2:
+                v2to3(config);
+                break;
+            default:
+                logger.severe(MigrationUtils.ERROR_1);
+                logger.severe(String.format(MigrationUtils.ERROR_2, FILE));
+                throw new IllegalStateException(String.format(MigrationUtils.EXCEPTION, FILE, version));
         }
         return true;
     }
@@ -97,6 +101,26 @@ public class MessageMigration {
         config.set("Help", null);
 
         config.set("version", 2);
+    }
+
+    private static void v2to3(ConfigurationSection config) {
+        config.set("account.invalidAlias", "<red>Invalid alias<reset>: <reason>");
+        config.set("account.createDenied", "<red>You do not have permission to create '<namespace>' accounts.");
+        config.set("account.createExists", "<red>Account already exists<reset>: <name>");
+        config.set("account.createFailed", "<red>Failed to create account<reset>: <reason>");
+        config.set("account.createSuccess", "<green>Created account <name> (uuid=<uuid>, balance=<balance>).");
+        config.set("account.listEmpty", "<yellow>No accounts in namespace<reset>: <namespace>");
+        config.set("account.listHeader", "<green>Accounts in '<namespace>':");
+        config.set("account.listEntry", "  <name> = <balance>");
+        config.set("account.unknownSource", "<red>Unknown source account<reset>: <name>");
+        config.set("account.unknownDestination", "<red>Unknown destination account<reset>: <name>");
+        config.set("account.sendDenied", "<red>You do not have permission to send from '<namespace>' accounts.");
+        config.set("account.sendSuccess", "<green>Sent <amount> from <from> to <to> (id=<id>).");
+        config.set("account.sendInsufficient", "<red>Insufficient funds in <from> (available=<available>, required=<required>).");
+        config.set("account.sendVetoed", "<red>Vetoed by modifier '<modifier>'<reset>: <reason>");
+        config.set("account.sendAccountMissing", "<red>Account missing<reset>: <which>");
+        config.set("account.sendInvalidAmount", "<red>Invalid amount<reset>: <reason>");
+        config.set("version", 3);
     }
 
     private static void move(ConfigurationSection config, String oldKey, String newKey) {

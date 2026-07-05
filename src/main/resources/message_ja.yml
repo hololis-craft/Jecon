@@ -1,0 +1,60 @@
+doNotHavePermission: "<red>権限がありません!!"
+missingArgument: "<red>引数が足りません。"
+invalidArgument: "<red>引数が不正です<reset>: <value>"
+playerNotFound: "<red>プレイヤーが見つかりません<reset>: <name>"
+
+accountNotFound: "<red>口座が見つかりません<reset>: <name>"
+notEnough: "<red>口座の残高が不足しています。"
+
+show: "<name> の残高: <balance>"
+paySuccess: "<green><amount> を <name> に送金しました。"
+payReceive: "<green><name> から <amount> を受け取りました。"
+set: "<green><name> の残高を <balance> に設定しました。"
+give: "<green><name> に <amount> を付与しました。"
+take: "<green><name> から <amount> を回収しました。"
+create: "<green><name> の口座を作成しました (残高: <balance>)。"
+createAlready: "<red>口座は既に存在します: <name>"
+remove: "<green><name> の口座を削除しました (残高: <balance>)"
+reloaded: "設定を再読み込みしました。"
+
+topFirst: "<green>======<reset> 長者番付 (Page: <page>) <green>======"
+topEntry: "<rank>: <name> (<balance>)"
+
+account:
+    invalidAlias: "<red>alias が不正です<reset>: <reason>"
+    createDenied: "<red>namespace '<namespace>' の口座を作成する権限がありません。"
+    createExists: "<red>口座は既に存在します<reset>: <name>"
+    createFailed: "<red>口座の作成に失敗しました<reset>: <reason>"
+    createSuccess: "<green>口座を作成しました: <name> (uuid=<uuid>, 残高=<balance>)。"
+    listEmpty: "<yellow>namespace '<namespace>' に口座はありません。"
+    listHeader: "<green>namespace '<namespace>' の口座一覧:"
+    listEntry: "  <name> = <balance>"
+    unknownSource: "<red>送金元の口座が見つかりません<reset>: <name>"
+    unknownDestination: "<red>送金先の口座が見つかりません<reset>: <name>"
+    sendDenied: "<red>namespace '<namespace>' の口座から送金する権限がありません。"
+    sendSuccess: "<green><amount> を <from> から <to> へ送金しました (id=<id>)。"
+    sendInsufficient: "<red><from> の残高が不足しています (残高=<available>, 必要=<required>)。"
+    sendVetoed: "<red>modifier '<modifier>' により送金が拒否されました<reset>: <reason>"
+    sendAccountMissing: "<red>口座が見つかりません<reset>: <which>"
+    sendInvalidAmount: "<red>金額が不正です<reset>: <reason>"
+
+help:
+    show: "残高を表示します。"
+    pay: "<player> に <amount> を送金します。"
+    set: "<player> の残高を <balance> に設定します。"
+    give: "<player> に <amount> を付与します。"
+    take: "<player> から <amount> を回収します。"
+    create: "<player> の口座を作成します。"
+    remove: "<player> の口座を削除します。"
+    top: "長者番付を表示します。"
+    reload: "設定を再読み込みします。"
+    version: "バージョンを表示します。"
+    help: "ヘルプを表示します。"
+    example: "例:"
+
+# //*<!-- syntax -->*/
+# MiniMessage format: https://docs.advntr.dev/minimessage/format.html
+# See message.yml for the tag reference.
+
+# Don't touch
+version: 3

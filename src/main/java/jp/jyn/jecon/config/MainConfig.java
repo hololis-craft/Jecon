@@ -12,6 +12,8 @@ public class MainConfig {
     public final BigDecimal defaultBalance;
     public final boolean createAccountOnJoin;
 
+    public final String locale;
+
     public final boolean transactionLog;
     public final FormatConfig format;
     public final DatabaseConfig database;
@@ -19,6 +21,8 @@ public class MainConfig {
     MainConfig(ConfigurationSection config) {
         defaultBalance = new BigDecimal(config.getString("defaultBalance"));
         createAccountOnJoin = config.getBoolean("createAccountOnJoin");
+
+        locale = config.getString("locale", "en").toLowerCase(Locale.ENGLISH);
 
         transactionLog = config.getBoolean("transactionLog", false);
 

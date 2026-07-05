@@ -73,6 +73,7 @@ public class MessageConfig {
      */
     public final MessageTemplate topEntry;
 
+    public final AccountMessage account;
     public final HelpMessage help;
 
     MessageConfig(ConfigurationSection config) {
@@ -98,7 +99,94 @@ public class MessageConfig {
         topFirst = parse(config.getString("topFirst"));
         topEntry = parse(config.getString("topEntry"));
 
+        account = new AccountMessage(config.getConfigurationSection("account"));
         help = new HelpMessage(config.getConfigurationSection("help"));
+    }
+
+    public final static class AccountMessage {
+        /**
+         * reason
+         */
+        public final MessageTemplate invalidAlias;
+        /**
+         * namespace
+         */
+        public final MessageTemplate createDenied;
+        /**
+         * name
+         */
+        public final MessageTemplate createExists;
+        /**
+         * reason
+         */
+        public final MessageTemplate createFailed;
+        /**
+         * name,uuid,balance
+         */
+        public final MessageTemplate createSuccess;
+        /**
+         * namespace
+         */
+        public final MessageTemplate listEmpty;
+        /**
+         * namespace
+         */
+        public final MessageTemplate listHeader;
+        /**
+         * name,balance
+         */
+        public final MessageTemplate listEntry;
+        /**
+         * name
+         */
+        public final MessageTemplate unknownSource;
+        /**
+         * name
+         */
+        public final MessageTemplate unknownDestination;
+        /**
+         * namespace
+         */
+        public final MessageTemplate sendDenied;
+        /**
+         * amount,from,to,id
+         */
+        public final MessageTemplate sendSuccess;
+        /**
+         * from,available,required
+         */
+        public final MessageTemplate sendInsufficient;
+        /**
+         * modifier,reason
+         */
+        public final MessageTemplate sendVetoed;
+        /**
+         * which
+         */
+        public final MessageTemplate sendAccountMissing;
+        /**
+         * reason
+         */
+        public final MessageTemplate sendInvalidAmount;
+
+        private AccountMessage(ConfigurationSection config) {
+            invalidAlias = parse(config, "invalidAlias");
+            createDenied = parse(config, "createDenied");
+            createExists = parse(config, "createExists");
+            createFailed = parse(config, "createFailed");
+            createSuccess = parse(config, "createSuccess");
+            listEmpty = parse(config, "listEmpty");
+            listHeader = parse(config.getString("listHeader"));
+            listEntry = parse(config.getString("listEntry"));
+            unknownSource = parse(config, "unknownSource");
+            unknownDestination = parse(config, "unknownDestination");
+            sendDenied = parse(config, "sendDenied");
+            sendSuccess = parse(config, "sendSuccess");
+            sendInsufficient = parse(config, "sendInsufficient");
+            sendVetoed = parse(config, "sendVetoed");
+            sendAccountMissing = parse(config, "sendAccountMissing");
+            sendInvalidAmount = parse(config, "sendInvalidAmount");
+        }
     }
 
     public final static class HelpMessage {
