@@ -92,6 +92,12 @@ public class Jecon extends JavaPlugin {
         modifierRegistry = new ModifierRegistryImpl();
         transferService = new TransferServiceImpl(this, db, accountService, modifierRegistry);
 
+        // BalanceRepository (SyncRepository) は TransferService の下流に接続する (ADR-0010)。
+        ((SyncRepository) repository).bindTransferService(transferService);
+
+        // legacy source/sink 口座を用意する
+        ensureLegacyAccounts();
+
         services.register(AccountService.class, accountService);
         services.register(BalanceRepository.class, repository);
         services.register(TransferService.class, transferService);
@@ -221,6 +227,21 @@ public class Jecon extends JavaPlugin {
 
     public ModifierRegistry getModifierRegistry() {
         return modifierRegistry;
+    }
+
+    /**
+     * BalanceRepository shim が対向として使う {@code system:legacy_source} /
+     * {@code system:legacy_sink} を、プラグイン起動時に確実に用意する。
+     */
+    private void ensureLegacyAccounts() {
+        if (!accountService.exists(SyncRepository.LEGACY_SOURCE_UUID)) {
+            accountService.createAccount(
+                SyncRepository.LEGACY_SOURCE_UUID, SyncRepository.LEGACY_SOURCE_ALIAS, false);
+        }
+        if (!accountService.exists(SyncRepository.LEGACY_SINK_UUID)) {
+            accountService.createAccount(
+                SyncRepository.LEGACY_SINK_UUID, SyncRepository.LEGACY_SINK_ALIAS, false);
+        }
     }
 
     private class AccountLifecycleAdapter implements AccountServiceImpl.AccountLifecycleObserver {
