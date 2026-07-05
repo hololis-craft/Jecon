@@ -5,6 +5,9 @@ import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
+import jp.jyn.jecon.account.Account;
+import jp.jyn.jecon.account.AccountService;
+import jp.jyn.jecon.account.AccountServiceImpl;
 import jp.jyn.jecon.command.Convert;
 import jp.jyn.jecon.command.Create;
 import jp.jyn.jecon.command.Give;
@@ -19,8 +22,11 @@ import jp.jyn.jecon.command.Version;
 import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MainConfig;
 import jp.jyn.jecon.db.Database;
+import jp.jyn.jecon.event.JeconAccountCreatedEvent;
+import jp.jyn.jecon.event.JeconAccountRemovedEvent;
 import jp.jyn.jecon.repository.BalanceRepository;
 import jp.jyn.jecon.repository.SyncRepository;
+import jp.jyn.jecon.services.JeconServices;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.HandlerList;
@@ -30,6 +36,7 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.math.BigDecimal;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
@@ -41,6 +48,8 @@ public class Jecon extends JavaPlugin {
     private ConfigLoader config;
     private BalanceRepository repository;
     private VaultEconomy economy;
+    private AccountService accountService;
+    private final JeconServices services = new JeconServices();
 
     // Fields elevated for cross-reload access
     private Database db;
@@ -69,6 +78,15 @@ public class Jecon extends JavaPlugin {
         // init repository (Sync only per ADR-0012)
         repository = new SyncRepository(main, db);
         destructor.addFirst(() -> repository = null);
+
+        // AccountService (ADR-0011 / ADR-0013)
+        accountService = new AccountServiceImpl(db, new AccountLifecycleAdapter());
+        services.register(AccountService.class, accountService);
+        services.register(BalanceRepository.class, repository);
+        destructor.addFirst(() -> {
+            services.clear();
+            accountService = null;
+        });
 
         // register vault
         if (economy == null) {
@@ -169,6 +187,36 @@ public class Jecon extends JavaPlugin {
 
     public ConfigLoader getConfigLoader() {
         return config;
+    }
+
+    /**
+     * 公開 Service Locator。{@code services().get(AccountService.class)} のように取得する。
+     */
+    public JeconServices services() {
+        return services;
+    }
+
+    public AccountService getAccountService() {
+        return accountService;
+    }
+
+    private class AccountLifecycleAdapter implements AccountServiceImpl.AccountLifecycleObserver {
+        @Override
+        public void onAccountCreated(Account account) {
+            getServer().getPluginManager().callEvent(
+                new JeconAccountCreatedEvent(account, BigDecimal.ZERO)
+            );
+        }
+
+        @Override
+        public void onAccountRemoved(Account account) {
+            BigDecimal balance = repository == null
+                ? BigDecimal.ZERO
+                : repository.getDecimal(account.uuid()).orElse(BigDecimal.ZERO);
+            getServer().getPluginManager().callEvent(
+                new JeconAccountRemovedEvent(account, balance)
+            );
+        }
     }
 
     private class VaultRegister implements Listener {

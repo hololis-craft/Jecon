@@ -308,6 +308,103 @@ public abstract class Database {
         }
     }
 
+    // ─── account_member テーブル ─────────────────────────────────────
+
+    public int getMemberPermissions(int accountId, UUID member) {
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT `permissions` FROM `account_member` WHERE `account_id`=? AND `member_uuid`=?"
+             )) {
+            statement.setInt(1, accountId);
+            statement.setBytes(2, UUIDBytes.toBytes(member));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return resultSet.getInt(1);
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+        return -1;
+    }
+
+    /**
+     * account_member を upsert する。すでに member が居ればビットマスクを上書き。
+     */
+    public boolean upsertMember(int accountId, UUID member, int permissionMask, boolean createOnly) {
+        int existing = getMemberPermissions(accountId, member);
+        if (existing >= 0) {
+            if (createOnly) {
+                return false;
+            }
+            try (Connection connection = hikari.getConnection();
+                 PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE `account_member` SET `permissions`=? WHERE `account_id`=? AND `member_uuid`=?"
+                 )) {
+                statement.setInt(1, permissionMask);
+                statement.setInt(2, accountId);
+                statement.setBytes(3, UUIDBytes.toBytes(member));
+                return statement.executeUpdate() != 0;
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "INSERT INTO `account_member` (`account_id`, `member_uuid`, `permissions`) VALUES (?,?,?)"
+             )) {
+            statement.setInt(1, accountId);
+            statement.setBytes(2, UUIDBytes.toBytes(member));
+            statement.setInt(3, permissionMask);
+            return statement.executeUpdate() != 0;
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public boolean removeMember(int accountId, UUID member) {
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "DELETE FROM `account_member` WHERE `account_id`=? AND `member_uuid`=?"
+             )) {
+            statement.setInt(1, accountId);
+            statement.setBytes(2, UUIDBytes.toBytes(member));
+            return statement.executeUpdate() != 0;
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public List<UUID> listMembers(int accountId) {
+        List<UUID> result = new ArrayList<>();
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT `member_uuid` FROM `account_member` WHERE `account_id`=?"
+             )) {
+            statement.setInt(1, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    result.add(UUIDBytes.fromBytes(resultSet.getBytes(1)));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+        return result;
+    }
+
+    public boolean deleteAllMembers(int accountId) {
+        try (Connection connection = hikari.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "DELETE FROM `account_member` WHERE `account_id`=?"
+             )) {
+            statement.setInt(1, accountId);
+            return statement.executeUpdate() != 0;
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     // ─── balance テーブル ────────────────────────────────────────────
 
     public OptionalLong getBalance(int id) {
