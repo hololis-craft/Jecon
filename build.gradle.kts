@@ -97,6 +97,14 @@ publishing {
             name = "localRepo"
             url  = uri("${rootProject.projectDir}/mvn-repo")
         }
+        maven {
+            name = "GitHubPackages"
+            url  = uri("https://maven.pkg.github.com/${System.getenv("GITHUB_REPOSITORY") ?: "hololis-craft/Jecon"}")
+            credentials {
+                username = System.getenv("GITHUB_ACTOR")
+                password = System.getenv("GITHUB_TOKEN")
+            }
+        }
     }
 }
 
