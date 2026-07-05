@@ -308,6 +308,24 @@ public abstract class Database {
         }
     }
 
+    /**
+     * HikariDataSource へ直接アクセスするための公開ハンドル（{@link jp.jyn.jecon.query.TransactionQueryService}
+     * のような同一パッケージ外のクエリ実装から利用）。原則として本クラスのメソッド越しに使うことを推奨。
+     */
+    public HikariDataSource hikari() {
+        return hikari;
+    }
+
+    /** {@link Instant} を driver 別の型に bind する（MySQL は Timestamp、SQLite は epoch millis）。 */
+    public void bindInstant(PreparedStatement statement, int index, Instant instant) throws SQLException {
+        setOccurredAt(statement, index, instant);
+    }
+
+    /** ResultSet の対応列を {@link Instant} として読む。driver 別のオーバーライドが可能。 */
+    public Instant readInstant(ResultSet resultSet, String column) throws SQLException {
+        return Instant.ofEpochMilli(resultSet.getLong(column));
+    }
+
     // ─── transaction helpers ─────────────────────────────────────────
 
     /**

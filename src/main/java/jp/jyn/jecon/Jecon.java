@@ -26,6 +26,8 @@ import jp.jyn.jecon.event.JeconAccountCreatedEvent;
 import jp.jyn.jecon.event.JeconAccountRemovedEvent;
 import jp.jyn.jecon.modifier.ModifierRegistry;
 import jp.jyn.jecon.modifier.ModifierRegistryImpl;
+import jp.jyn.jecon.query.TransactionQueryService;
+import jp.jyn.jecon.query.TransactionQueryServiceImpl;
 import jp.jyn.jecon.repository.BalanceRepository;
 import jp.jyn.jecon.repository.SyncRepository;
 import jp.jyn.jecon.services.JeconServices;
@@ -56,6 +58,7 @@ public class Jecon extends JavaPlugin {
     private AccountService accountService;
     private TransferService transferService;
     private ModifierRegistry modifierRegistry;
+    private TransactionQueryService transactionQueryService;
     private final JeconServices services = new JeconServices();
 
     // Fields elevated for cross-reload access
@@ -93,6 +96,9 @@ public class Jecon extends JavaPlugin {
         modifierRegistry = new ModifierRegistryImpl();
         transferService = new TransferServiceImpl(this, db, accountService, modifierRegistry);
 
+        // 集計クエリ (04-context-and-log.md)
+        transactionQueryService = new TransactionQueryServiceImpl(db);
+
         // BalanceRepository (SyncRepository) は TransferService の下流に接続する (ADR-0010)。
         ((SyncRepository) repository).bindTransferService(transferService);
 
@@ -103,11 +109,13 @@ public class Jecon extends JavaPlugin {
         services.register(BalanceRepository.class, repository);
         services.register(TransferService.class, transferService);
         services.register(ModifierRegistry.class, modifierRegistry);
+        services.register(TransactionQueryService.class, transactionQueryService);
         destructor.addFirst(() -> {
             services.clear();
             accountService = null;
             transferService = null;
             modifierRegistry = null;
+            transactionQueryService = null;
         });
 
         // register vault (旧 Vault)

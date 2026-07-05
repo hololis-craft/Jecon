@@ -27,6 +27,12 @@ public class MySQL extends Database {
     }
 
     @Override
+    public Instant readInstant(java.sql.ResultSet resultSet, String column) throws SQLException {
+        Timestamp ts = resultSet.getTimestamp(column);
+        return ts == null ? null : ts.toInstant();
+    }
+
+    @Override
     protected void createTable() {
         try (Connection connection = hikari.getConnection();
              Statement statement = connection.createStatement()) {
