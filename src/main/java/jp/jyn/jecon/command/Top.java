@@ -41,12 +41,15 @@ public class Top {
         BalanceRepository repository = plugin.getRepository();
         Database db = plugin.getDb();
 
+        boolean playerOnly = config.getMainConfig().hideNonPlayerAccounts
+                && !sender.hasPermission("jecon.viewnonplayer");
+
         int offset = (page - 1) * ENTRY_PER_PAGE;
         sender.sendMessage(message.topFirst.toComponent(
                 Placeholder.unparsed("page", String.valueOf(page))));
 
         int i = offset;
-        for (Database.TopEntry entry : db.topWithAliases(ENTRY_PER_PAGE, offset)) {
+        for (Database.TopEntry entry : db.topWithAliases(ENTRY_PER_PAGE, offset, playerOnly)) {
             BigDecimal balance = BigDecimal.valueOf(entry.balance()).scaleByPowerOfTen(-2);
             sender.sendMessage(message.topEntry.toComponent(
                     Placeholder.unparsed("rank", String.valueOf(++i)),

@@ -15,6 +15,7 @@ public class MainConfig {
     public final String locale;
 
     public final boolean transactionLog;
+    public final boolean hideNonPlayerAccounts;
     public final FormatConfig format;
     public final DatabaseConfig database;
 
@@ -25,6 +26,7 @@ public class MainConfig {
         locale = config.getString("locale", "en").toLowerCase(Locale.ENGLISH);
 
         transactionLog = config.getBoolean("transactionLog", false);
+        hideNonPlayerAccounts = config.getBoolean("hideNonPlayerAccounts", true);
 
         format = new FormatConfig(config.getConfigurationSection("format"));
         database = new DatabaseConfig(config.getConfigurationSection("database"));

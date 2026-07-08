@@ -278,11 +278,16 @@ public abstract class Database {
     }
 
     public List<String> suggestAliases(String prefix, int limit) {
+        return suggestAliases(prefix, limit, false);
+    }
+
+    public List<String> suggestAliases(String prefix, int limit, boolean playerOnly) {
         List<String> result = new ArrayList<>();
+        String sql = playerOnly
+            ? "SELECT `alias` FROM `account` WHERE `alias` LIKE ? AND `is_player`=1 ORDER BY `alias` ASC LIMIT ?"
+            : "SELECT `alias` FROM `account` WHERE `alias` LIKE ? ORDER BY `alias` ASC LIMIT ?";
         try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "SELECT `alias` FROM `account` WHERE `alias` LIKE ? ORDER BY `alias` ASC LIMIT ?"
-             )) {
+             PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, prefix + "%");
             statement.setInt(2, limit);
             try (ResultSet resultSet = statement.executeQuery()) {
@@ -639,13 +644,21 @@ public abstract class Database {
     }
 
     public List<TopEntry> topWithAliases(int limit, int offset) {
+        return topWithAliases(limit, offset, false);
+    }
+
+    public List<TopEntry> topWithAliases(int limit, int offset, boolean playerOnly) {
         List<TopEntry> result = new ArrayList<>();
+        String sql = playerOnly
+            ? "SELECT `balance`.`id`,`balance`.`balance`,`account`.`alias` " +
+                "FROM `balance` INNER JOIN `account` ON `balance`.`id`=`account`.`id` " +
+                "WHERE `account`.`is_player`=1 " +
+                "ORDER BY `balance`.`balance` DESC LIMIT ? OFFSET ?"
+            : "SELECT `balance`.`id`,`balance`.`balance`,`account`.`alias` " +
+                "FROM `balance` LEFT JOIN `account` ON `balance`.`id`=`account`.`id` " +
+                "ORDER BY `balance`.`balance` DESC LIMIT ? OFFSET ?";
         try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "SELECT `balance`.`id`,`balance`.`balance`,`account`.`alias` " +
-                     "FROM `balance` LEFT JOIN `account` ON `balance`.`id`=`account`.`id` " +
-                     "ORDER BY `balance`.`balance` DESC LIMIT ? OFFSET ?"
-             )) {
+             PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setInt(1, limit);
             statement.setInt(2, offset);
             try (ResultSet resultSet = statement.executeQuery()) {

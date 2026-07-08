@@ -23,7 +23,7 @@ final class CachedPlayerArgument {
 
     static RequiredArgumentBuilder<CommandSourceStack, String> player(Jecon plugin) {
         return Commands.argument("player", StringArgumentType.word())
-                .suggests((ctx, builder) -> suggest(plugin, builder));
+                .suggests((ctx, builder) -> suggest(plugin, ctx, builder));
     }
 
     static Optional<Target> resolve(CommandContext<CommandSourceStack> ctx) {
@@ -39,9 +39,13 @@ final class CachedPlayerArgument {
         return 0;
     }
 
-    private static CompletableFuture<Suggestions> suggest(Jecon plugin, SuggestionsBuilder builder) {
+    private static CompletableFuture<Suggestions> suggest(Jecon plugin,
+                                                          CommandContext<CommandSourceStack> ctx,
+                                                          SuggestionsBuilder builder) {
         String remaining = builder.getRemaining();
-        plugin.getDb().suggestAliases(remaining, SUGGESTION_LIMIT).forEach(builder::suggest);
+        boolean playerOnly = plugin.getConfigLoader().getMainConfig().hideNonPlayerAccounts
+                && !ctx.getSource().getSender().hasPermission("jecon.viewnonplayer");
+        plugin.getDb().suggestAliases(remaining, SUGGESTION_LIMIT, playerOnly).forEach(builder::suggest);
         return builder.buildFuture();
     }
 

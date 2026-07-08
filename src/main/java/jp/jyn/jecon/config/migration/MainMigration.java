@@ -7,7 +7,7 @@ import java.util.logging.Logger;
 
 public class MainMigration {
     private final static String FILE = "config.yml";
-    private final static int CURRENT_VERSION = 6;
+    private final static int CURRENT_VERSION = 7;
 
     private MainMigration() {}
 
@@ -33,6 +33,8 @@ public class MainMigration {
                 v4to5(config);
             case 5:
                 v5to6(config);
+            case 6:
+                v6to7(config);
                 break;
             default:
                 logger.severe(MigrationUtils.ERROR_1);
@@ -101,6 +103,11 @@ public class MainMigration {
     private static void v5to6(ConfigurationSection config) {
         config.set("locale", "en");
         config.set("version", 6);
+    }
+
+    private static void v6to7(ConfigurationSection config) {
+        config.set("hideNonPlayerAccounts", true);
+        config.set("version", 7);
     }
 
     @SuppressWarnings("SpellCheckingInspection")

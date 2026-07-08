@@ -10,6 +10,12 @@ locale: en
 # Transaction logging: record all balance changes to transaction_log table.
 transactionLog: true
 
+# Hide non-player accounts (e.g. system/shop accounts registered via
+# `/jecon account create <namespace>:<key>`) from `/money top` output
+# and from `<player>` argument tab completion.
+# Players with `jecon.viewnonplayer` bypass this filter.
+hideNonPlayerAccounts: true
+
 format:
   singularMajor: "dollar"
   pluralMajor: "dollars"
@@ -67,4 +73,4 @@ database:
     idleTimeout: -1
 
 # Don't touch
-version: 6
+version: 7

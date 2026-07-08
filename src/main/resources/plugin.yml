@@ -25,6 +25,7 @@ permissions:
       jecon.version: true
       jecon.account: true
       jecon.transfer.overdraft: true
+      jecon.viewnonplayer: true
   jecon.user:
     children:
       jecon.show: true
@@ -43,6 +44,7 @@ permissions:
       jecon.version: true
       jecon.account: true
       jecon.transfer.overdraft: true
+      jecon.viewnonplayer: true
   jecon.show:
     default: true
   jecon.pay:
@@ -73,3 +75,6 @@ permissions:
   jecon.transfer.overdraft:
     default: op
     description: "Allow --overdraft on /jecon account send"
+  jecon.viewnonplayer:
+    default: op
+    description: "Bypass the hideNonPlayerAccounts filter (see non-player accounts in /money top and <player> tab completion)"
