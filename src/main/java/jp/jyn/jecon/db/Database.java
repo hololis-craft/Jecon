@@ -150,7 +150,7 @@ public abstract class Database {
             } else {
                 statement.setString(4, namespace);
             }
-            statement.setLong(5, System.currentTimeMillis());
+            bindInstant(statement, 5, Instant.now());
             statement.executeUpdate();
         }
     }
@@ -240,7 +240,7 @@ public abstract class Database {
                         resultSet.getString("alias"),
                         resultSet.getInt("is_player") != 0,
                         resultSet.getString("namespace"),
-                        Instant.ofEpochMilli(resultSet.getLong("created_at"))
+                        readInstant(resultSet, "created_at")
                     ));
                 }
             }
@@ -267,7 +267,7 @@ public abstract class Database {
                         resultSet.getString("alias"),
                         resultSet.getInt("is_player") != 0,
                         namespace,
-                        Instant.ofEpochMilli(resultSet.getLong("created_at"))
+                        readInstant(resultSet, "created_at")
                     ));
                 }
             }
@@ -704,7 +704,7 @@ public abstract class Database {
                             } else {
                                 prepare.setString(5, ns);
                             }
-                            prepare.setLong(6, rs.getLong("created_at"));
+                            bindInstant(prepare, 6, oldDB.readInstant(rs, "created_at"));
                             prepare.addBatch();
                         }
                         prepare.executeBatch();
