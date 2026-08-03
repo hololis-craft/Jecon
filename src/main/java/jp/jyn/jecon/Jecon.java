@@ -9,6 +9,7 @@ import jp.jyn.jecon.account.Account;
 import jp.jyn.jecon.account.AccountService;
 import jp.jyn.jecon.account.AccountServiceImpl;
 import jp.jyn.jecon.command.AccountCommand;
+import jp.jyn.jecon.concurrent.BukkitMainThreadBridge;
 import jp.jyn.jecon.command.Convert;
 import jp.jyn.jecon.command.Create;
 import jp.jyn.jecon.command.Give;
@@ -23,7 +24,7 @@ import jp.jyn.jecon.command.Version;
 import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MainConfig;
 import jp.jyn.jecon.db.Database;
-import jp.jyn.jecon.event.BukkitEventDispatcher;
+import jp.jyn.jecon.event.QueuedEventDispatcher;
 import jp.jyn.jecon.event.JeconAccountCreatedEvent;
 import jp.jyn.jecon.event.JeconAccountRemovedEvent;
 import jp.jyn.jecon.modifier.ModifierRegistry;
@@ -62,7 +63,7 @@ public class Jecon extends JavaPlugin {
     private TransferService transferService;
     private ModifierRegistry modifierRegistry;
     private TransactionQueryService transactionQueryService;
-    private BukkitEventDispatcher eventDispatcher;
+    private QueuedEventDispatcher eventDispatcher;
     private final JeconServices services = new JeconServices();
 
     // Fields elevated for cross-reload access
@@ -98,7 +99,10 @@ public class Jecon extends JavaPlugin {
 
         // event はキューに積んで毎 tick メインスレッドから発火する。
         // 振替が非メインスレッドから来ても同期 event の契約を守れるようにするため。
-        eventDispatcher = new BukkitEventDispatcher(this);
+        eventDispatcher = new QueuedEventDispatcher(
+            event -> getServer().getPluginManager().callEvent(event),
+            (event, error) -> getLogger().log(java.util.logging.Level.SEVERE,
+                "Failed to dispatch " + event.getEventName(), error));
         BukkitTask dispatcherTask = getServer().getScheduler().runTaskTimer(this, eventDispatcher, 1L, 1L);
         destructor.addFirst(() -> {
             dispatcherTask.cancel();
@@ -111,7 +115,7 @@ public class Jecon extends JavaPlugin {
         // Modifier registry と TransferService (ADR-0004 / 03-transfer-api.md / 05-modifier-pipeline.md)
         modifierRegistry = new ModifierRegistryImpl();
         transferService = new TransferServiceImpl(db, accountService, modifierRegistry,
-            eventDispatcher, getLogger());
+            eventDispatcher, new BukkitMainThreadBridge(this), getLogger());
 
         // 集計クエリ (04-context-and-log.md)
         transactionQueryService = new TransactionQueryServiceImpl(db);
@@ -311,7 +315,7 @@ public class Jecon extends JavaPlugin {
 
         private void post(org.bukkit.event.Event event) {
             // ensureLegacyAccounts() は dispatcher の生成前に走り得るので null を許容する。
-            BukkitEventDispatcher dispatcher = eventDispatcher;
+            QueuedEventDispatcher dispatcher = eventDispatcher;
             if (dispatcher != null) {
                 dispatcher.post(event);
             }

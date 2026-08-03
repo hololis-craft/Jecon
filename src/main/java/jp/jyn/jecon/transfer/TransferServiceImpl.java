@@ -2,6 +2,8 @@ package jp.jyn.jecon.transfer;
 
 import jp.jyn.jecon.account.AccountService;
 import jp.jyn.jecon.account.Aliases;
+import jp.jyn.jecon.concurrent.MainThreadBridge;
+import jp.jyn.jecon.concurrent.MainThreadUnavailableException;
 import jp.jyn.jecon.db.Database;
 import jp.jyn.jecon.event.EventDispatcher;
 import jp.jyn.jecon.event.JeconTransferCompletedEvent;
@@ -40,19 +42,24 @@ public class TransferServiceImpl implements TransferService {
     private static final int CAS_ATTEMPTS = 5;
     /** 差分 0 で実際には書き込みが起きなかった場合の transferId。 */
     private static final long NO_OP_TRANSFER_ID = -1L;
+    /** メインスレッドへ pipeline を回せなかった場合の Veto 元 id。 */
+    private static final String MAIN_THREAD_MODIFIER_ID = "jecon:main-thread-bridge";
 
     private final Database db;
     private final AccountService accountService;
     private final ModifierRegistry modifierRegistry;
     private final EventDispatcher events;
+    private final MainThreadBridge mainThread;
     private final Logger logger;
 
     public TransferServiceImpl(Database db, AccountService accountService,
-                               ModifierRegistry modifierRegistry, EventDispatcher events, Logger logger) {
+                               ModifierRegistry modifierRegistry, EventDispatcher events,
+                               MainThreadBridge mainThread, Logger logger) {
         this.db = db;
         this.accountService = accountService;
         this.modifierRegistry = modifierRegistry;
         this.events = events;
+        this.mainThread = mainThread;
         this.logger = logger;
     }
 
@@ -152,8 +159,40 @@ public class TransferServiceImpl implements TransferService {
      * @return 非 null なら以降の処理を行わずその結果を返す（Veto など）
      */
     private TransferResult runModifiers(List<LegEntry> entries, TransferContext ctx) {
+        List<TransferModifier> registered = modifierRegistry.registered();
+        if (registered.isEmpty()) {
+            // 登録が無ければスレッド判定すら不要
+            return null;
+        }
+
+        if (requiresMainThread(registered) && !mainThread.isMainThread()) {
+            // modifier が Bukkit API を触る可能性があるので pipeline だけメインスレッドで回す。
+            // Future.get() が entries への変更の可視性も保証する。
+            try {
+                return mainThread.callSync(() -> runPipeline(registered, entries, ctx));
+            } catch (MainThreadUnavailableException e) {
+                logger.warning("Could not run the modifier pipeline on the main thread, " +
+                    "rejecting the transfer: " + e.getMessage());
+                return new TransferResult.Vetoed(MAIN_THREAD_MODIFIER_ID,
+                    "modifiers could not run on the main thread");
+            }
+        }
+        return runPipeline(registered, entries, ctx);
+    }
+
+    private static boolean requiresMainThread(List<TransferModifier> modifiers) {
+        for (TransferModifier modifier : modifiers) {
+            if (!modifier.isThreadSafe()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private TransferResult runPipeline(List<TransferModifier> modifiers, List<LegEntry> entries,
+                                       TransferContext ctx) {
         ProbeImpl probe = new ProbeImpl(entries, ctx.overdraft());
-        for (TransferModifier modifier : modifierRegistry.registered()) {
+        for (TransferModifier modifier : modifiers) {
             ModifiedTransfer result = safelyModify(modifier, ctx, probe);
             TransferResult applied = applyModifierResult(modifier, result, entries, 0);
             if (applied != null) {

@@ -3,6 +3,7 @@ package jp.jyn.jecon.transfer;
 import jp.jyn.jecon.account.AccountService;
 import jp.jyn.jecon.account.AccountServiceImpl;
 import jp.jyn.jecon.account.Aliases;
+import jp.jyn.jecon.concurrent.MainThreadBridge;
 import jp.jyn.jecon.db.Database;
 import jp.jyn.jecon.event.EventDispatcher;
 import jp.jyn.jecon.modifier.ModifiedTransfer;
@@ -52,7 +53,7 @@ class TransferServiceImplTest {
         modifiers = new ModifierRegistryImpl();
         EventDispatcher dispatcher = posted::add;
         transferService = new TransferServiceImpl(db, accountService, modifiers,
-            dispatcher, TestFixture.quietLogger());
+            dispatcher, MainThreadBridge.INLINE, TestFixture.quietLogger());
         TestFixture.ensureSystemAccounts(db);
     }
 
