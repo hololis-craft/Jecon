@@ -100,7 +100,16 @@ public class JeconTransferCompletedEvent extends Event {
 }
 ```
 
-同期発火（メインスレッド）。
+メインスレッドで、**commit 順に、DB commit と同じ tick 以降**に発火する（[ADR-0014](./adr/0014-thread-safe-write-path.md)）。
+振替は任意のスレッドから呼べるが、Bukkit は同期 event を非メインスレッドから発火できないため、
+Jecon は event をキューに積んで毎 tick メインスレッドから流す。
+
+そのため以下に注意する。
+
+- **発火は `transfer()` の戻りより後**になる。呼び出し元のスレッドでは「振替完了 → event 購読側の処理完了」の順序を仮定できない。
+- メインスレッドからの振替も同じキューを通る。commit 順と発火順を一致させるための意図的な設計で、同期呼び出しでも即時発火はしない。
+- 発火が保証されるのは commit 成功時のみ。失敗（残高不足 / Veto / 口座なし）では発火しない。
+
 副作用の重い処理（外部集計、通知）は購読側で async に飛ばす。
 
 主な購読者：
@@ -162,20 +171,52 @@ Vault 経由の `Economy.deposit/withdraw` も同じシムを経由する（[08-
 
 Sync 単一モードなので Lazy 前提の注記は持たない（[ADR-0012](./adr/0012-drop-lazy-repository.md)）。
 
+**公開 API は全て任意のスレッドから呼べる**（[ADR-0014](./adr/0014-thread-safe-write-path.md)）。
+Vault の `Economy` は同期インタフェースであり、呼び出し元プラグインが async スレッドから
+叩いてくることを Jecon 側では防げないため、そこを前提に組んでいる。
+
 | Service | 呼び出し可能スレッド | 備考 |
 |---|---|---|
-| `AccountService.get*` / `resolveAlias` | メインスレッド | DB クエリを含む |
-| `AccountService.createAccount` / `createSharedAccount` | メインスレッド | DB access が入る |
-| `TransferService.transfer/transferBatch` | メインスレッド | DB access が入るが short lived |
-| `ModifierRegistry.*` | メインスレッド | |
-| `TransactionQueryService.*` | 非同期スレッド | 重いクエリを想定 |
+| `AccountService.*` | 任意 | 書き込みは単一トランザクション。`account` 行のロックで直列化 |
+| `TransferService.transfer` / `transferBatch` | 任意 | 単一トランザクション。`account.id` 昇順ロック |
+| `TransferService.setBalance` | 任意 | 楽観的並行制御。競合上限で `TransferResult.Conflict` |
+| `BalanceRepository.*` | 任意 | 書き込みは `TransferService` に委譲 |
+| `ModifierRegistry.*` | 任意 | 実装は全メソッド `synchronized` |
+| `TransactionQueryService.*` | 任意 | 重いクエリを想定。メインスレッドから呼ぶべきではない |
 
-将来的に `TransferService.transferAsync` を追加する余地は残すが、Phase 1 では持たない。
-Job プラグインの pipeline は既にメインスレッドで走っており、そこから同期呼び出しで十分低レイテンシで返る想定。
+### 呼び出し側が守ること
+
+- **同期 API は呼び出し元のスレッド上でそのまま実行される。** executor には投げないので、
+  メインスレッドから呼べば DB の待ち時間がそのまま tick に乗る。並行する書き込みが
+  行ロックを持っていれば、その解放も待つ。レイテンシを気にする場合は呼び出し側で
+  async スレッドに逃がす。
+- **メインスレッドから Jecon のワーカーを待つ構造を作らないこと。** Jecon 自身は
+  「ワーカー → メイン」の待ち（Modifier pipeline の hop）だけを持つので循環しないが、
+  呼び出し側が逆向きの待ちを作ると deadlock し得る。
+- 一時的な競合（deadlock / `SQLITE_BUSY`）は Jecon 内部で再試行する。上限を超えた場合は
+  `TransientDatabaseException` になる。データは変更されていない。
+
+### TransferModifier
+
+`TransferModifier.modify` は既定で**メインスレッドで実行される**。非メインスレッドからの
+振替では、pipeline の実行だけをメインスレッドへ回す（1 tick 程度のレイテンシが乗る）。
+
+`isThreadSafe()` に `true` を返すと hop を省略して呼び出し元スレッドで実行する。
+`TransferProbe` と自身のスレッドセーフな状態しか触らない場合に限って宣言すること。
+Bukkit API（`Player`、`World`、`Inventory`、scoreboard 等）に触るなら既定の `false` のままにする。
+
+メインスレッドに回せなかった場合（停止処理中、5 秒のタイムアウト）、振替は
+`TransferResult.Vetoed`（`modifierId` = `jecon:main-thread-bridge`）で失敗する。
+modifier を飛ばして通すことはしない。
+
+将来的に `TransferService.transferAsync`（`CompletableFuture` 版）を追加する余地は残す。
+同期 API が任意のスレッドから安全になったので、これは「メインスレッドを待たせない」ための
+利便性 API であり、正しさのために必要なものではない。
 
 ## 関連 ADR
 
 - [ADR-0010 BalanceRepository の後方互換](./adr/0010-backward-compat-balancerepository.md)
 - [ADR-0011 VaultUnlockedAPI 採用と shared account 写像](./adr/0011-vaultunlocked-shared-account-no-async.md)
+- [ADR-0014 書き込み経路をスレッドセーフにする](./adr/0014-thread-safe-write-path.md)
 - [ADR-0012 LazyRepository を廃止し Sync 単一モードにする](./adr/0012-drop-lazy-repository.md)
 - [ADR-0013 口座の主キーを UUID とし alias を副次表現とする](./adr/0013-uuid-primary-alias-secondary.md)
