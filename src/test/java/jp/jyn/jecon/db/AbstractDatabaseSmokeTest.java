@@ -1,12 +1,8 @@
 package jp.jyn.jecon.db;
 
-import jp.jyn.jecon.testing.TestFixture;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
+import jp.jyn.jecon.testing.BackendTestBase;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -14,25 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * テスト基盤が Bukkit サーバ無しで動くことを確認する最小テスト。
+ * driver ごとの基本的な CRUD と制約違反の扱い。
+ *
+ * <p>制約違反の検出は driver 差を吸収するオーバーライドで実装しているので、
+ * 両 driver で回す価値がある（sqlite-jdbc は SQLState を設定しない）。
  */
-class DatabaseSmokeTest {
-    @TempDir
-    File dataFolder;
-
-    private Database db;
-
-    @BeforeEach
-    void setUp() {
-        db = TestFixture.sqlite(dataFolder);
-    }
-
-    @AfterEach
-    void tearDown() {
-        if (db != null) {
-            db.close();
-        }
-    }
+abstract class AbstractDatabaseSmokeTest extends BackendTestBase {
 
     @Test
     void createsSchemaAndRoundTripsAnAccount() {
@@ -82,16 +65,49 @@ class DatabaseSmokeTest {
         int id = db.getOrCreatePlayerId(account);
 
         assertEquals(-1, db.getMemberPermissions(id, member), "未登録は -1");
-        assertTrue(db.upsertMember(id, member, 0b101, true));
+
+        assertTrue(inTx(c -> db.insertMemberIfAbsent(c, id, member, 0b101)));
         assertEquals(0b101, db.getMemberPermissions(id, member));
 
-        assertFalse(db.upsertMember(id, member, 0b010, true), "createOnly では既存を上書きしない");
+        assertFalse(inTx(c -> db.insertMemberIfAbsent(c, id, member, 0b010)),
+            "既存行があれば何もしない");
         assertEquals(0b101, db.getMemberPermissions(id, member));
 
-        assertTrue(db.upsertMember(id, member, 0b010, false));
+        // ビット演算は SQL 側で評価される
+        assertTrue(inTx(c -> db.addMemberPermissions(c, id, member, 0b010)));
+        assertEquals(0b111, db.getMemberPermissions(id, member));
+
+        assertTrue(inTx(c -> db.clearMemberPermissions(c, id, member, 0b101)));
         assertEquals(0b010, db.getMemberPermissions(id, member));
+
+        assertTrue(inTx(c -> db.setMemberPermissions(c, id, member, 0b1000)));
+        assertEquals(0b1000, db.getMemberPermissions(id, member), "set は上書き");
 
         assertTrue(db.removeMember(id, member));
         assertEquals(-1, db.getMemberPermissions(id, member));
+    }
+
+    /** 行が無い状態からの upsert も確認する（INSERT 側の分岐）。 */
+    @Test
+    void permissionBitOpsCreateTheRowWhenAbsent() {
+        int id = db.getOrCreatePlayerId(UUID.randomUUID());
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+
+        assertTrue(inTx(c -> db.addMemberPermissions(c, id, a, 0b100)));
+        assertEquals(0b100, db.getMemberPermissions(id, a));
+
+        // 無い行に対するビット落としは、権限 0 の行を作る（従来の挙動）
+        assertTrue(inTx(c -> db.clearMemberPermissions(c, id, b, 0b001)));
+        assertEquals(0, db.getMemberPermissions(id, b));
+    }
+
+    private boolean inTx(TxBool work) {
+        return db.inTransaction(work::apply);
+    }
+
+    @FunctionalInterface
+    private interface TxBool {
+        boolean apply(java.sql.Connection connection) throws java.sql.SQLException;
     }
 }

@@ -72,14 +72,41 @@ DB レベルで原子性を確保すれば、スレッド数もサーバ数も�
 
 ### 2. ロック地点を `account` 行に統一する
 
-口座に対する一連の操作（残高更新、メンバー権限更新、削除）は `account` 行のロック下で行う。
+複数ステップを直列化する必要がある操作（残高更新、口座削除）は `account` 行のロック下で行う。
 `account` 行は必ず存在するので、MySQL でも gap lock ではなく素の行ロックになる。
 
-`account_member` のような「存在しないかもしれない行」を `FOR UPDATE` すると InnoDB は
-gap lock を取るが、gap lock 同士は競合しないため、2 つのトランザクションが揃って
-INSERT に進んでデッドロックする。これを避けるための選択。
-
 複数口座に触る場合は `account.id` 昇順でロックする。削除と振替が同じ順序を使うので交錯しない。
+
+権限のビット操作はこの仕組みを使わない。単一の upsert で完結させるため、そもそも
+直列化が不要になる（理由は次項）。
+
+### 2-b. 「ロックしてから読んで書き戻す」は MySQL では成立しない
+
+`account` 行を `FOR UPDATE` でロックしてから `account_member` を通常の SELECT で読み、
+ビットを立てて書き戻す実装は**誤り**だった。MySQL の既定分離レベル REPEATABLE READ では、
+行ロックを取得した後の通常の SELECT もトランザクション開始時点のスナップショットを返すため、
+待たされている間に他トランザクションが commit した値が見えない。結果として lost update する。
+
+SQLite は `BEGIN IMMEDIATE` で全 writer を直列化するので同じコードでも問題が出ず、
+**MySQL のテストを CI に入れて初めて露見した**。
+
+そのため権限のビット操作はアプリ側で読まず、書き込み時に評価される SQL 式で行う
+（`permissions = permissions | ?` / `permissions & ~?` の upsert）。読み取りが無ければ
+スナップショットの問題は原理的に発生しない。
+
+これを踏まえ、他の経路も「ロック後に値を読む箇所が locking read になっているか」で見直した。
+
+| 経路 | ロック後の読み取り | 判定 |
+|---|---|---|
+| `TransferServiceImpl` の残高 | `selectBalanceForUpdate`（locking read） | 最新の commit 済み値が読める |
+| `setBalance` の CAS 比較 | 同上 | OK |
+| 口座の存在確認 | `lockAccountRow`（locking read） | 削除済みなら false が返る |
+| `AccountService.delete` | `lockAccountRow` の後は DELETE のみ | 読み戻しが無い |
+| 権限のビット操作 | **通常の SELECT だった** | SQL 式に置き換え |
+
+なお `account_member` を直接 `FOR UPDATE` する案は採らない。行が存在しない場合に InnoDB は
+gap lock を取り、gap lock 同士は競合しないので、2 つのトランザクションが揃って INSERT に
+進んでデッドロックし得る。
 
 ### 3. `balance` 行を勝手に生やさない
 
@@ -185,6 +212,17 @@ Bukkit サーバを起動しない JUnit テストで検証する（`EventDispat
 | `AccountServiceImplTest.concurrentSetPermissionDoesNotLoseBits` | 権限ビットの lost update | ビットが落ちる |
 | `AccountServiceImplTest.concurrentDeleteAndBalanceWriteLeavesNoOrphanRows` | 孤児 `balance` 行 | 60 行残る |
 | `TransferServiceImplTest.setBalanceHitsItsTargetEvenIfTheBalanceMovesAfterTheRead` | `set` の stale read | 200.00 を指定して 210.00 になる |
+
+DB 依存のテストは SQLite と MySQL の両方で回す（`BackendTestBase` のサブクラス）。
+MySQL は Testcontainers で起動し、テストごとに新しいスキーマを作る。CI では
+`-Djecon.test.mysql=true` を渡して、Docker が無いことによる暗黙の skip を失敗にする。
+
+ロック挙動の driver 差は実際に不具合を生むので、片方だけでは不十分:
+
+- `concurrentSetPermissionDoesNotLoseBits` は SQLite では通り MySQL で落ちた（上記 2-b）。
+- `config.yml` の既定 `mysql.init` が MySQL 8 で `Unknown system variable 'query_cache_type'`
+  になり、コネクションプールが初期化できず**プラグインが起動しなかった**。
+  MySQL テストを追加した最初の実行で検出。
 
 最後のテストは Modifier pipeline を同期フックとして使う決定論的なテスト。pipeline は残高読み取りの
 後・トランザクションの前に走るので、そこで別スレッドの入金を確定させれば狙った窓に必ず割り込める。

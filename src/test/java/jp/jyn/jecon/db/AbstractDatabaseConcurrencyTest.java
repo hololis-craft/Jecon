@@ -1,12 +1,8 @@
 package jp.jyn.jecon.db;
 
-import jp.jyn.jecon.testing.TestFixture;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
+import jp.jyn.jecon.testing.BackendTestBase;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -27,32 +23,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>lost update があれば総額がずれるので必ず落ちる。async 対応の中核となる不変条件。
  */
-class DatabaseConcurrencyTest {
+abstract class AbstractDatabaseConcurrencyTest extends BackendTestBase {
     private static final int ACCOUNTS = 6;
     private static final long INITIAL_BALANCE = 100_000L;
     private static final int THREADS = 8;
     private static final int TRANSFERS_PER_THREAD = 60;
 
-    @TempDir
-    File dataFolder;
-
-    private Database db;
     private final List<Integer> ids = new ArrayList<>();
 
-    @BeforeEach
-    void setUp() {
-        db = TestFixture.sqlite(dataFolder);
+    @Override
+    protected void afterDatabaseOpened() {
+        ids.clear();
         for (int i = 0; i < ACCOUNTS; i++) {
             int id = db.getOrCreatePlayerId(UUID.randomUUID());
             db.createBalance(id, INITIAL_BALANCE);
             ids.add(id);
-        }
-    }
-
-    @AfterEach
-    void tearDown() {
-        if (db != null) {
-            db.close();
         }
     }
 
@@ -82,17 +67,6 @@ class DatabaseConcurrencyTest {
             db.setBalanceInTx(connection, toId, toBalance + amount);
             return null;
         });
-    }
-
-    @Test
-    void sqliteRunsInWalMode() throws Exception {
-        // WAL でないと reader が writer をブロックし、並行アクセスが直列化する。
-        try (var connection = db.hikari().getConnection();
-             var statement = connection.createStatement();
-             var rs = statement.executeQuery("PRAGMA journal_mode")) {
-            assertTrue(rs.next());
-            assertEquals("wal", rs.getString(1).toLowerCase());
-        }
     }
 
     @Test

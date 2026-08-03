@@ -39,16 +39,24 @@ dependencies {
     testImplementation("io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT")
     // 本番では Paper が同梱する JDBC driver を使うので implementation には入れない。
     testRuntimeOnly("org.xerial:sqlite-jdbc:3.47.1.0")
+    testRuntimeOnly("com.mysql:mysql-connector-j:9.1.0")
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    // MySQL 経路のテスト用。Docker が無い環境では該当テストを skip する。
+    testImplementation("org.testcontainers:mysql:1.21.4")
+    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.16")
 }
 
 tasks.test {
     useJUnitPlatform()
     testLogging {
         events("passed", "skipped", "failed")
+        // MySQL テストが skip された場合に気付けるように理由を出す
+        showStandardStreams = false
     }
+    // Docker が使えない環境では MySQL テストを skip する（既定は自動判定）。
+    systemProperty("jecon.test.mysql", System.getProperty("jecon.test.mysql", "auto"))
 }
 
 tasks.processResources {

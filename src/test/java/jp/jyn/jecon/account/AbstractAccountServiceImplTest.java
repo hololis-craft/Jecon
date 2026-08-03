@@ -1,13 +1,8 @@
 package jp.jyn.jecon.account;
 
-import jp.jyn.jecon.db.Database;
-import jp.jyn.jecon.testing.TestFixture;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
+import jp.jyn.jecon.testing.BackendTestBase;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
@@ -24,24 +19,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class AccountServiceImplTest {
-    @TempDir
-    File dataFolder;
-
-    private Database db;
+abstract class AbstractAccountServiceImplTest extends BackendTestBase {
     private AccountService service;
 
-    @BeforeEach
-    void setUp() {
-        db = TestFixture.sqlite(dataFolder);
+    @Override
+    protected void afterDatabaseOpened() {
         service = new AccountServiceImpl(db, AccountServiceImpl.AccountLifecycleObserver.NOOP);
-    }
-
-    @AfterEach
-    void tearDown() {
-        if (db != null) {
-            db.close();
-        }
     }
 
     /** account 行が無い balance 行が残っていないか。 */

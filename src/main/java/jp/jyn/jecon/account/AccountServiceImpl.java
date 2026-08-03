@@ -78,7 +78,7 @@ public class AccountServiceImpl implements AccountService {
                     new IllegalStateException("account id missing after insert: " + uuid));
                 db.createBalance(connection, accountId, 0L);
                 if (owner != null) {
-                    db.upsertMember(connection, accountId, owner, ALL_PERMISSIONS_MASK, true);
+                    db.insertMemberIfAbsent(connection, accountId, owner, ALL_PERMISSIONS_MASK);
                 }
                 return db.getAccountByUuid(connection, uuid).orElseThrow(() ->
                     new IllegalStateException("account not found after insert: " + uuid));
@@ -173,50 +173,43 @@ public class AccountServiceImpl implements AccountService {
     @Override
     public boolean addMember(UUID account, UUID member, AccountPermission... initialPermissions) {
         int mask = mask(initialPermissions);
-        return withLockedAccount(account, (connection, accountId) ->
-            db.upsertMember(connection, accountId, member, mask, false));
+        return withAccountId(account, (connection, accountId) ->
+            db.setMemberPermissions(connection, accountId, member, mask));
     }
 
     @Override
     public boolean removeMember(UUID account, UUID member) {
-        return withLockedAccount(account, (connection, accountId) ->
+        return withAccountId(account, (connection, accountId) ->
             db.removeMember(connection, accountId, member));
     }
 
     @Override
     public boolean setPermission(UUID account, UUID member, AccountPermission perm, boolean value) {
         int bit = 1 << perm.ordinal();
-        // read-modify-write。account 行のロック下で行うので、同じ口座への並行更新で
-        // ビットが取りこぼされることはない。
-        return withLockedAccount(account, (connection, accountId) -> {
-            int existing = db.getMemberPermissions(connection, accountId, member);
-            int base = existing < 0 ? 0 : existing;
-            int updated = value ? (base | bit) : (base & ~bit);
-            return db.upsertMember(connection, accountId, member, updated, false);
-        });
+        // ビット演算は SQL 側で行う。「行をロックしてから読んで書き戻す」は MySQL の
+        // 既定分離レベル (REPEATABLE READ) では成立しない: ロック取得後の通常の SELECT も
+        // トランザクション開始時のスナップショットを返すため、他トランザクションが commit した
+        // 値を見落として lost update する。SQLite は BEGIN IMMEDIATE で全 writer を直列化する
+        // ので同じコードでも問題が出ず、MySQL のテストを追加して初めて露見した。
+        return withAccountId(account, (connection, accountId) -> value
+            ? db.addMemberPermissions(connection, accountId, member, bit)
+            : db.clearMemberPermissions(connection, accountId, member, bit));
     }
 
     /**
-     * {@code account} 行のロックを取ってから作業を実行する。
+     * account.id を解決してから作業を実行する。
      *
-     * <p>{@code account_member} を直接 {@code FOR UPDATE} すると、行が存在しない場合に
-     * MySQL が gap lock を取る。gap lock 同士は競合しないので、2 つのトランザクションが
-     * 揃って INSERT に進んでデッドロックする。常に存在する {@code account} 行を
-     * ロック地点にすればこれを回避できる。
+     * <p>いずれの操作も単一の upsert / delete なので、行ロックを別途取る必要はない。
      *
      * @return 口座が存在しなければ false
      */
-    private boolean withLockedAccount(UUID account, LockedAccountWork work) {
+    private boolean withAccountId(UUID account, LockedAccountWork work) {
         return db.inTransactionWithRetry(connection -> {
             OptionalInt idOpt = db.resolveId(connection, account);
             if (idOpt.isEmpty()) {
                 return false;
             }
-            int accountId = idOpt.getAsInt();
-            if (!db.lockAccountRow(connection, accountId)) {
-                return false;
-            }
-            return work.apply(connection, accountId);
+            return work.apply(connection, idOpt.getAsInt());
         });
     }
 

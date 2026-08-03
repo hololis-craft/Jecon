@@ -1,12 +1,8 @@
 package jp.jyn.jecon.db;
 
-import jp.jyn.jecon.testing.TestFixture;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
+import jp.jyn.jecon.testing.BackendTestBase;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
 import java.sql.SQLException;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -19,28 +15,18 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /**
  * {@link Database#inTransaction} / {@link Database#inTransactionWithRetry} の契約。
  */
-class DatabaseTransactionTest {
-    /** sqlite-jdbc の {@code SQLITE_BUSY}。driver の isRetryable が true を返す値。 */
-    private static final int SQLITE_BUSY = 5;
-
-    @TempDir
-    File dataFolder;
-
-    private Database db;
+abstract class AbstractDatabaseTransactionTest extends BackendTestBase {
     private int id;
 
-    @BeforeEach
-    void setUp() {
-        db = TestFixture.sqlite(dataFolder);
+    @Override
+    protected void afterDatabaseOpened() {
         id = db.getOrCreatePlayerId(UUID.randomUUID());
         db.createBalance(id, 1_000L);
     }
 
-    @AfterEach
-    void tearDown() {
-        if (db != null) {
-            db.close();
-        }
+    /** driver が「再試行すべき」と判定する SQLException を作る。 */
+    private SQLException retryable() {
+        return new SQLException("transient conflict", null, backend().retryableErrorCode());
     }
 
     @Test
@@ -88,7 +74,7 @@ class DatabaseTransactionTest {
 
         long result = db.inTransactionWithRetry(c -> {
             if (attempts.incrementAndGet() < 3) {
-                throw new SQLException("database is locked", null, SQLITE_BUSY);
+                throw retryable();
             }
             db.setBalanceInTx(c, id, 55L);
             return db.selectBalanceForUpdate(c, id).orElseThrow();
@@ -106,7 +92,7 @@ class DatabaseTransactionTest {
         TransientDatabaseException thrown = assertThrows(TransientDatabaseException.class,
             () -> db.inTransactionWithRetry(c -> {
                 attempts.incrementAndGet();
-                throw new SQLException("database is locked", null, SQLITE_BUSY);
+                throw retryable();
             }));
 
         assertEquals(4, attempts.get(), "上限まで試行する");

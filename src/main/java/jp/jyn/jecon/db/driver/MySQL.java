@@ -35,6 +35,27 @@ public class MySQL extends Database {
         return "40001".equals(e.getSQLState());
     }
 
+    // account_member の upsert。
+    // VALUES() は MySQL 8.0.20 で deprecated だが、行エイリアス構文 (AS new) は 8.0.19 以降
+    // でしか使えないため、互換性を優先してこちらを使う。
+    private static final String MEMBER_INSERT =
+        "INSERT INTO `account_member` (`account_id`, `member_uuid`, `permissions`) VALUES (?,?,?)";
+
+    @Override
+    protected String sqlMemberSet() {
+        return MEMBER_INSERT + " ON DUPLICATE KEY UPDATE `permissions`=VALUES(`permissions`)";
+    }
+
+    @Override
+    protected String sqlMemberOr() {
+        return MEMBER_INSERT + " ON DUPLICATE KEY UPDATE `permissions`=`permissions`|VALUES(`permissions`)";
+    }
+
+    @Override
+    protected String sqlMemberAndNot() {
+        return MEMBER_INSERT + " ON DUPLICATE KEY UPDATE `permissions`=`permissions`&~?";
+    }
+
     @Override
     protected void setOccurredAt(PreparedStatement statement, int index, Instant occurredAt) throws SQLException {
         statement.setTimestamp(index, Timestamp.from(occurredAt));

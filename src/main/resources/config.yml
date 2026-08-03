@@ -52,9 +52,11 @@ database:
     name: "jecon"
     username: "root"
     password: "your_mysql_password"
-    # It is recommended to stop caching when using MySQL
-    # If you have caches in your application, database cache is "wasted memory".
-    init: "SET SESSION query_cache_type=0"
+    # Executed on every new pooled connection.
+    # NOTE: do not put "SET SESSION query_cache_type=0" here. The query cache was
+    # removed in MySQL 8.0, so that statement fails with "Unknown system variable",
+    # and a failing init statement makes the connection pool refuse to start.
+    init: "/* Jecon */SELECT 1"
     properties:
       "useSSL": "false"
       # encoding
@@ -80,4 +82,4 @@ database:
     idleTimeout: -1
 
 # Don't touch
-version: 7
+version: 8

@@ -77,6 +77,27 @@ public class SQLite extends Database {
         }
     }
 
+    private static final String MEMBER_INSERT =
+        "INSERT INTO `account_member` (`account_id`, `member_uuid`, `permissions`) VALUES (?,?,?)";
+    private static final String MEMBER_CONFLICT = " ON CONFLICT(`account_id`,`member_uuid`) ";
+
+    @Override
+    protected String sqlMemberSet() {
+        return MEMBER_INSERT + MEMBER_CONFLICT + "DO UPDATE SET `permissions`=excluded.`permissions`";
+    }
+
+    @Override
+    protected String sqlMemberOr() {
+        return MEMBER_INSERT + MEMBER_CONFLICT
+            + "DO UPDATE SET `permissions`=`account_member`.`permissions`|excluded.`permissions`";
+    }
+
+    @Override
+    protected String sqlMemberAndNot() {
+        return MEMBER_INSERT + MEMBER_CONFLICT
+            + "DO UPDATE SET `permissions`=`account_member`.`permissions`&~?";
+    }
+
     /**
      * WAL に切り替える。reader が writer をブロックしなくなるので、複数接続から
      * 並行アクセスする前提では必須。DB ファイルに永続する設定なので毎回設定しても無害。

@@ -4,20 +4,16 @@ import jp.jyn.jecon.account.AccountService;
 import jp.jyn.jecon.account.AccountServiceImpl;
 import jp.jyn.jecon.account.Aliases;
 import jp.jyn.jecon.concurrent.MainThreadBridge;
-import jp.jyn.jecon.db.Database;
 import jp.jyn.jecon.event.EventDispatcher;
 import jp.jyn.jecon.modifier.ModifiedTransfer;
 import jp.jyn.jecon.modifier.ModifierRegistryImpl;
 import jp.jyn.jecon.modifier.TransferModifier;
 import jp.jyn.jecon.modifier.TransferProbe;
+import jp.jyn.jecon.testing.BackendTestBase;
 import jp.jyn.jecon.testing.TestFixture;
 import org.bukkit.event.Event;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,32 +32,21 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class TransferServiceImplTest {
-    @TempDir
-    File dataFolder;
-
-    private Database db;
+abstract class AbstractTransferServiceImplTest extends BackendTestBase {
     private AccountService accountService;
     private TransferService transferService;
     private final Queue<Event> posted = new ConcurrentLinkedQueue<>();
     private ModifierRegistryImpl modifiers;
 
-    @BeforeEach
-    void setUp() {
-        db = TestFixture.sqlite(dataFolder);
+    @Override
+    protected void afterDatabaseOpened() {
+        posted.clear();
         accountService = new AccountServiceImpl(db, AccountServiceImpl.AccountLifecycleObserver.NOOP);
         modifiers = new ModifierRegistryImpl();
         EventDispatcher dispatcher = posted::add;
         transferService = new TransferServiceImpl(db, accountService, modifiers,
             dispatcher, MainThreadBridge.INLINE, TestFixture.quietLogger());
         TestFixture.ensureSystemAccounts(db);
-    }
-
-    @AfterEach
-    void tearDown() {
-        if (db != null) {
-            db.close();
-        }
     }
 
     private UUID account(String alias, String balance) {

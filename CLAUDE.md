@@ -28,8 +28,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### テスト
 
 `src/test/java` に JUnit 5 のテストがある。Bukkit サーバを起動せずに動く
-(`YamlConfiguration` は純 Java、DB は一時ディレクトリの SQLite)。
+(`YamlConfiguration` は純 Java、DB は SQLite / Testcontainers の MySQL)。
 `jp.jyn.jecon.testing.TestFixture` がバンドル済み `config.yml` を読んで `Database` を組み立てる。
+
+DB 依存のテストは `BackendTestBase` を継承し、`Sqlite*Test` / `Mysql*Test` の 2 つの
+サブクラスで**両 driver で回す**。MySQL 側は Docker が無いと skip されるので、
+`./gradlew test -Djecon.test.mysql=true` で明示的に要求できる (CI はこれを使う)。
+
+**ロック周りを変更したら必ず MySQL でも回すこと。** MySQL の既定分離レベルは
+REPEATABLE READ で、行ロックを取った後の通常の SELECT もトランザクション開始時点の
+スナップショットを返す。一方 SQLite は `BEGIN IMMEDIATE` で全 writer を直列化するため、
+「ロックしてから読んで書き戻す」コードは SQLite では通って MySQL で lost update する。
+実際にこの差で 1 件バグを出している (ADR-0014 の 2-b)。
 
 並行性のテスト (総額保存、権限ビットの lost update、孤児 balance 行、`setBalance` の stale read) が
 本体の設計を支えているので、書き込み経路を触るときは必ず実行する。

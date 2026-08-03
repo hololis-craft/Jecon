@@ -9,11 +9,12 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.UncheckedIOException;
 import java.io.Reader;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -33,26 +34,29 @@ public final class TestFixture {
         return logger;
     }
 
-    /**
-     * バンドルされた config.yml をそのまま読み込んだ {@link MainConfig} を返す。
-     *
-     * @param dataFolder SQLite ファイルを置くディレクトリ（JUnit の {@code @TempDir} を渡す）
-     */
+    /** バンドルされた config.yml をそのまま読み込んだ {@link MainConfig}。 */
     public static MainConfig mainConfig(File dataFolder) {
-        return mainConfig(dataFolder, YamlConfiguration::loadConfiguration);
+        return mainConfig(dataFolder, yaml -> {});
     }
 
     /**
-     * config.yml を読み込んだ後に加工してから {@link MainConfig} を組み立てる。
-     * connectionPool の設定を上書きするテストなどで使う。
+     * バンドルされた config.yml を読み込み、{@code customizer} で加工してから
+     * {@link MainConfig} を組み立てる。
+     *
+     * <p>既定値を土台にするのが重要。既定の {@code init} や {@code properties} が
+     * 特定の DB バージョンで通らないなら、それはテストで落ちるべきこと。
+     *
+     * @param dataFolder SQLite ファイルを置くディレクトリ（JUnit の {@code @TempDir} を渡す）
      */
-    public static MainConfig mainConfig(File dataFolder, java.util.function.Function<Reader, YamlConfiguration> loader) {
+    public static MainConfig mainConfig(File dataFolder, Consumer<YamlConfiguration> customizer) {
         try (InputStream in = TestFixture.class.getClassLoader().getResourceAsStream("config.yml")) {
             if (in == null) {
                 throw new IllegalStateException("config.yml not found on the test classpath");
             }
             try (Reader reader = new InputStreamReader(in, StandardCharsets.UTF_8)) {
-                return new MainConfig(loader.apply(reader), dataFolder);
+                YamlConfiguration yaml = YamlConfiguration.loadConfiguration(reader);
+                customizer.accept(yaml);
+                return new MainConfig(yaml, dataFolder);
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);

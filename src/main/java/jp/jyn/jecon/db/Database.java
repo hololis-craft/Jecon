@@ -680,36 +680,80 @@ public abstract class Database {
     /**
      * account_member を upsert する。すでに member が居ればビットマスクを上書き。
      */
-    public boolean upsertMember(int accountId, UUID member, int permissionMask, boolean createOnly) {
-        return withConnection(c -> upsertMember(c, accountId, member, permissionMask, createOnly));
+    /**
+     * 権限マスクを指定値で上書きする（無ければ作る）。
+     *
+     * <p>アプリ側で読んでから書くのではなく upsert 1 文で行う。MySQL の既定分離レベル
+     * REPEATABLE READ では、行ロックを取った後の通常の SELECT もトランザクション開始時の
+     * スナップショットを返すため、「ロックしてから読んで書く」では他トランザクションが
+     * commit した値を見落として lost update する。書き込み時に評価される SQL 式にすれば
+     * この問題が原理的に発生しない。
+     */
+    public boolean setMemberPermissions(Connection connection, int accountId, UUID member, int mask)
+        throws SQLException {
+        return executeMemberUpsert(connection, sqlMemberSet(), accountId, member, mask, null);
     }
 
-    /** 呼び出し側のトランザクションに参加する {@link #upsertMember(int, UUID, int, boolean)}。 */
-    public boolean upsertMember(Connection connection, int accountId, UUID member, int permissionMask,
-                                boolean createOnly) throws SQLException {
-        int existing = getMemberPermissions(connection, accountId, member);
-        if (existing >= 0) {
-            if (createOnly) {
-                return false;
-            }
-            try (PreparedStatement statement = connection.prepareStatement(
-                "UPDATE `account_member` SET `permissions`=? WHERE `account_id`=? AND `member_uuid`=?"
-            )) {
-                statement.setInt(1, permissionMask);
-                statement.setInt(2, accountId);
-                statement.setBytes(3, UUIDBytes.toBytes(member));
-                return statement.executeUpdate() != 0;
-            }
-        }
+    /** 指定ビットを立てる（無ければそのビットだけを持つ行を作る）。 */
+    public boolean addMemberPermissions(Connection connection, int accountId, UUID member, int mask)
+        throws SQLException {
+        return executeMemberUpsert(connection, sqlMemberOr(), accountId, member, mask, null);
+    }
+
+    /** 指定ビットを落とす（無ければ権限 0 の行を作る。従来の実装と同じ挙動）。 */
+    public boolean clearMemberPermissions(Connection connection, int accountId, UUID member, int mask)
+        throws SQLException {
+        return executeMemberUpsert(connection, sqlMemberAndNot(), accountId, member, 0, mask);
+    }
+
+    /**
+     * 行が無ければ作る。既にあれば何もしない。
+     *
+     * @return 実際に INSERT したら true
+     */
+    public boolean insertMemberIfAbsent(Connection connection, int accountId, UUID member, int mask)
+        throws SQLException {
+        // affected rows では判定できない: mysql-connector-j は既定で CLIENT_FOUND_ROWS を使うため、
+        // ON DUPLICATE KEY UPDATE が「変更なし」でも matched 行数 1 を返す。
+        // 素の INSERT を試して制約違反を吸収する方が driver 非依存。
+        // 重複エラーは statement 単位のロールバックなので、トランザクションは継続できる。
         try (PreparedStatement statement = connection.prepareStatement(
             "INSERT INTO `account_member` (`account_id`, `member_uuid`, `permissions`) VALUES (?,?,?)"
         )) {
             statement.setInt(1, accountId);
             statement.setBytes(2, UUIDBytes.toBytes(member));
-            statement.setInt(3, permissionMask);
+            statement.setInt(3, mask);
+            return statement.executeUpdate() != 0;
+        } catch (SQLException e) {
+            if (isConstraintViolation(e)) {
+                return false;
+            }
+            throw e;
+        }
+    }
+
+    private boolean executeMemberUpsert(Connection connection, String sql, int accountId, UUID member,
+                                       int insertValue, Integer extraMask) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, accountId);
+            statement.setBytes(2, UUIDBytes.toBytes(member));
+            statement.setInt(3, insertValue);
+            if (extraMask != null) {
+                statement.setInt(4, extraMask);
+            }
             return statement.executeUpdate() != 0;
         }
     }
+
+    /** {@code permissions} を INSERT 値で上書きする upsert。bind は (account_id, member_uuid, mask)。 */
+    protected abstract String sqlMemberSet();
+
+    /** {@code permissions |= } INSERT 値。bind は (account_id, member_uuid, mask)。 */
+    protected abstract String sqlMemberOr();
+
+    /** {@code permissions &= ~mask}。bind は (account_id, member_uuid, 0, mask)。 */
+    protected abstract String sqlMemberAndNot();
+
 
     public boolean removeMember(int accountId, UUID member) {
         return withConnection(c -> removeMember(c, accountId, member));
