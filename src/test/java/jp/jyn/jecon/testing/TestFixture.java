@@ -1,5 +1,6 @@
 package jp.jyn.jecon.testing;
 
+import jp.jyn.jecon.account.Aliases;
 import jp.jyn.jecon.config.MainConfig;
 import jp.jyn.jecon.db.Database;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -11,6 +12,8 @@ import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -59,5 +62,29 @@ public final class TestFixture {
     /** 一時ディレクトリ上の SQLite に接続した {@link Database} を返す。 */
     public static Database sqlite(File dataFolder) {
         return Database.connect(mainConfig(dataFolder).database, quietLogger());
+    }
+
+    /**
+     * {@code Jecon.ensureLegacyAccounts()} 相当の system 口座を用意する。
+     *
+     * <p>{@code BalanceRepository} / Vault bridge 経由の入出金はこれらを対向口座に使うため、
+     * 用意しないと書き込みが一律 false になる。
+     */
+    public static void ensureSystemAccounts(Database db) {
+        for (String alias : new String[]{
+            "system:legacy_source", "system:legacy_sink",
+            "system:vault_bridge", "system:vault_unlocked_bridge"
+        }) {
+            UUID uuid = Aliases.uuidFromAlias(alias);
+            if (db.resolveId(uuid).isPresent()) {
+                continue;
+            }
+            try {
+                db.insertAccount(uuid, alias, false, Aliases.namespaceOf(alias));
+            } catch (SQLException e) {
+                throw new IllegalStateException("failed to create system account: " + alias, e);
+            }
+            db.createBalance(db.resolveId(uuid).orElseThrow(), 0L);
+        }
     }
 }

@@ -18,19 +18,21 @@ public abstract class AbstractRepository implements BalanceRepository {
     public final static int FRACTIONAL_DIGITS = 2;
     protected final static int MULTIPLIER = 100;
 
-    private final NumberFormat numberFormat = NumberFormat.getNumberInstance();
-    private final Map<String, String> formatVariables = new HashMap<>(4);
+    /**
+     * {@link NumberFormat} ({@code DecimalFormat}) はスレッドセーフではない。
+     * format() は Vault の {@code Economy#format} 経由で任意のスレッドから呼ばれるため、
+     * インスタンスを共有せずスレッドごとに持つ。
+     */
+    private static final ThreadLocal<NumberFormat> NUMBER_FORMAT =
+        ThreadLocal.withInitial(NumberFormat::getNumberInstance);
 
     protected final Database db;
     private final MainConfig.FormatConfig formatConfig;
     private final LongFunction<String> minorFormat;
-    private final Map<UUID, Integer> uuidToIdCache;
 
     protected AbstractRepository(MainConfig config, Database db) {
         this.db = db;
         formatConfig = config.format;
-
-        uuidToIdCache = new HashMap<>();
 
         switch (formatConfig.minorType) {
             case OMIT:
@@ -58,13 +60,14 @@ public abstract class AbstractRepository implements BalanceRepository {
     private String format(long value) {
         long major = value / MULTIPLIER;
         long minor = value % MULTIPLIER;
-        formatVariables.clear();
-        formatVariables.put("major", numberFormat.format(major));
-        formatVariables.put("minor", minorFormat.apply(minor));
-        formatVariables.put("majorcurrency", major > 1 ? formatConfig.pluralMajor : formatConfig.singularMajor);
-        formatVariables.put("minorcurrency", minor > 1 ? formatConfig.pluralMinor : formatConfig.singularMinor);
+        // 変数 Map は呼び出しごとに作る。共有すると並行呼び出しで別スレッドの値が混ざる。
+        Map<String, String> variables = new HashMap<>(8);
+        variables.put("major", NUMBER_FORMAT.get().format(major));
+        variables.put("minor", minorFormat.apply(minor));
+        variables.put("majorcurrency", major > 1 ? formatConfig.pluralMajor : formatConfig.singularMajor);
+        variables.put("minorcurrency", minor > 1 ? formatConfig.pluralMinor : formatConfig.singularMinor);
 
-        return (minor == 0 ? formatConfig.formatZeroMinor : formatConfig.format).format(formatVariables);
+        return (minor == 0 ? formatConfig.formatZeroMinor : formatConfig.format).format(variables);
     }
 
     private String minorOmit(long minor) {
@@ -87,10 +90,6 @@ public abstract class AbstractRepository implements BalanceRepository {
         } else {
             return String.valueOf(minor);
         }
-    }
-
-    protected final Integer getId(UUID uuid) {
-        return uuidToIdCache.computeIfAbsent(uuid, db::getOrCreatePlayerId);
     }
 
     @Override
@@ -160,7 +159,9 @@ public abstract class AbstractRepository implements BalanceRepository {
 
     @Override
     public final boolean has(UUID uuid, double amount) {
-        return has(uuid, (long) amount * MULTIPLIER);
+        // double2long を通すこと。(long) amount * MULTIPLIER だと小数部を
+        // 切り捨ててから乗算するので has(uuid, 1.5) が 1.00 で通ってしまう。
+        return has(uuid, double2long(amount));
     }
 
     @Override
@@ -224,20 +225,9 @@ public abstract class AbstractRepository implements BalanceRepository {
     @Override
     public final Map<UUID, BigDecimal> top(int limit, int offset) {
         Map<UUID, BigDecimal> result = new LinkedHashMap<>();
-
-        // This is a heavy load.
-        // But, it is not a frequently executed process, so there is no problem.
-        HashMap<Integer, UUID> idToUUID = new HashMap<>(uuidToIdCache.size() * 4 / 3);
-        uuidToIdCache.forEach((key, value) -> idToUUID.put(value, key));
-
-        db.top(limit, offset).forEach((id, balance) -> {
-            UUID uuid = idToUUID.get(id);
-            if (uuid == null) {
-                uuid = db.getUUID(id).orElse(null);
-            }
-            result.put(uuid, BigDecimal.valueOf(balance).scaleByPowerOfTen(-FRACTIONAL_DIGITS));
-        });
-
+        db.top(limit, offset).forEach((id, balance) -> db.getUUID(id).ifPresent(
+            uuid -> result.put(uuid, BigDecimal.valueOf(balance).scaleByPowerOfTen(-FRACTIONAL_DIGITS))
+        ));
         return result;
     }
 }
