@@ -12,6 +12,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.SQLIntegrityConstraintViolationException;
 import java.sql.Statement;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -28,12 +29,19 @@ public abstract class Database {
     public record TopEntry(int id, long balance, String alias) {}
 
     protected final HikariDataSource hikari;
+    /** Bukkit に依存せずテストから差し替えられるよう、Logger は注入する。 */
+    protected final Logger logger;
 
-    protected Database(HikariDataSource hikari) {
+    protected Database(HikariDataSource hikari, Logger logger) {
         this.hikari = hikari;
+        this.logger = logger;
     }
 
     public static Database connect(MainConfig.DatabaseConfig config) {
+        return connect(config, Jecon.getInstance().getLogger());
+    }
+
+    public static Database connect(MainConfig.DatabaseConfig config, Logger logger) {
         HikariConfig hikariConfig = new HikariConfig();
 
         hikariConfig.setJdbcUrl(config.url);
@@ -59,15 +67,14 @@ public abstract class Database {
         }
 
         Database database;
-        Logger logger = Jecon.getInstance().getLogger();
         if (config.url.startsWith("jdbc:sqlite:")) {
             logger.info("Use SQLite");
-            database = new SQLite(new HikariDataSource(hikariConfig));
+            database = new SQLite(new HikariDataSource(hikariConfig), logger);
         } else if (config.url.startsWith("jdbc:mysql:")) {
             logger.info("Use MySQL");
             hikariConfig.setUsername(config.username);
             hikariConfig.setPassword(config.password);
-            database = new MySQL(new HikariDataSource(hikariConfig));
+            database = new MySQL(new HikariDataSource(hikariConfig), logger);
         } else {
             throw new IllegalArgumentException("Unknown jdbc");
         }
@@ -202,12 +209,25 @@ public abstract class Database {
             return statement.executeUpdate() != 0;
         } catch (SQLException e) {
             // UNIQUE 違反等は false で吸収し、致命エラーだけ throw
-            String state = e.getSQLState();
-            if (state != null && (state.startsWith("23") /* integrity constraint */)) {
+            if (isConstraintViolation(e)) {
                 return false;
             }
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * UNIQUE / PRIMARY KEY 制約違反かどうかを driver 差を吸収して判定する。
+     *
+     * <p>SQLState の {@code 23xxx} が標準だが、sqlite-jdbc は SQLState を設定せず
+     * vendor code だけを返すため driver 側でオーバーライドする。
+     */
+    protected boolean isConstraintViolation(SQLException e) {
+        if (e instanceof SQLIntegrityConstraintViolationException) {
+            return true;
+        }
+        String state = e.getSQLState();
+        return state != null && state.startsWith("23");
     }
 
     public Optional<UUID> resolveAlias(String alias) {

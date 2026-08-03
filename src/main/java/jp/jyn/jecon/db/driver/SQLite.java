@@ -1,7 +1,6 @@
 package jp.jyn.jecon.db.driver;
 
 import com.zaxxer.hikari.HikariDataSource;
-import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.db.DBMigrationUtils;
 import jp.jyn.jecon.db.Database;
 
@@ -15,13 +14,25 @@ import java.util.Set;
 import java.util.logging.Logger;
 
 public class SQLite extends Database {
-    public SQLite(HikariDataSource hikari) {
-        super(hikari);
+    public SQLite(HikariDataSource hikari, Logger logger) {
+        super(hikari, logger);
     }
+
+    /** {@code SQLITE_CONSTRAINT}。拡張コードは {@code 19 | (n << 8)} なので下位 1 バイトで判定する。 */
+    private static final int SQLITE_CONSTRAINT = 19;
 
     @Override
     protected boolean supportsSelectForUpdate() {
         return false;
+    }
+
+    @Override
+    protected boolean isConstraintViolation(SQLException e) {
+        // sqlite-jdbc は SQLState を設定せず vendor code のみを返す。
+        if ((e.getErrorCode() & 0xFF) == SQLITE_CONSTRAINT) {
+            return true;
+        }
+        return super.isConstraintViolation(e);
     }
 
     @Override
@@ -100,7 +111,6 @@ public class SQLite extends Database {
             return;
         }
 
-        Logger logger = Jecon.getInstance().getLogger();
         logger.info("Migrate SQLite");
 
         if ("1".equals(version)) {
@@ -186,7 +196,6 @@ public class SQLite extends Database {
      * balance はスキーマ変更が無いので touch しない。
      */
     private void v3to4() {
-        Logger logger = Jecon.getInstance().getLogger();
         logger.info("Migrating account/transaction_log to v4 schema");
         try (Connection connection = hikari.getConnection()) {
             connection.setAutoCommit(false);

@@ -1,7 +1,6 @@
 package jp.jyn.jecon.db.driver;
 
 import com.zaxxer.hikari.HikariDataSource;
-import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.db.DBMigrationUtils;
 import jp.jyn.jecon.db.Database;
 
@@ -17,8 +16,8 @@ import java.util.Set;
 import java.util.logging.Logger;
 
 public class MySQL extends Database {
-    public MySQL(HikariDataSource hikari) {
-        super(hikari);
+    public MySQL(HikariDataSource hikari, Logger logger) {
+        super(hikari, logger);
     }
 
     @Override
@@ -94,7 +93,6 @@ public class MySQL extends Database {
             return;
         }
 
-        Logger logger = Jecon.getInstance().getLogger();
         logger.info("Migrate MySQL");
 
         if (version.equals("1")) {
@@ -137,8 +135,7 @@ public class MySQL extends Database {
                 String table = resultSet.getString(1);
                 if (table.endsWith("account")) {
                     if (prefix != null) {
-                        Logger logger = Jecon.getInstance().getLogger();
-                        logger.severe(DBMigrationUtils.MIGRATION_ERROR_1);
+                                        logger.severe(DBMigrationUtils.MIGRATION_ERROR_1);
                         logger.severe("This database seems to be used by multiple Jecon.");
                         logger.severe("Since the prefix has been deleted, it is not possible to use one database with multiple Jecon.");
                         logger.severe("To continue processing, start up the server with -Djecon.prefix=<prefix>.");
@@ -154,7 +151,7 @@ public class MySQL extends Database {
     }
 
     private void v1to2(String prefix) {
-        Jecon.getInstance().getLogger().info("prefix: " + prefix);
+        logger.info("prefix: " + prefix);
         try (Connection connection = hikari.getConnection();
              Statement statement = connection.createStatement()) {
             statement.executeUpdate("RENAME TABLE " +
@@ -215,7 +212,6 @@ public class MySQL extends Database {
      * </ul>
      */
     private void v3to4() {
-        Logger logger = Jecon.getInstance().getLogger();
         logger.info("Migrating account/transaction_log to v4 schema");
         try (Connection connection = hikari.getConnection()) {
             connection.setAutoCommit(false);

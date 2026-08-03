@@ -33,6 +33,22 @@ dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT")
     compileOnly("net.milkbowl.vault:VaultUnlockedAPI:2.16")
     implementation("com.zaxxer:HikariCP:5.1.0")
+
+    // テストは Bukkit サーバを起動しない。paper-api は YamlConfiguration
+    // (純 Java) を config 読み込みに使うためだけに載せる。
+    testImplementation("io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT")
+    // 本番では Paper が同梱する JDBC driver を使うので implementation には入れない。
+    testRuntimeOnly("org.xerial:sqlite-jdbc:3.47.1.0")
+    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.test {
+    useJUnitPlatform()
+    testLogging {
+        events("passed", "skipped", "failed")
+    }
 }
 
 tasks.processResources {
