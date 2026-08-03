@@ -20,6 +20,14 @@ public final class Aliases {
     private static final Pattern NAMESPACE_PATTERN = Pattern.compile("[a-z0-9_-]{1," + NAMESPACE_MAX + "}");
     private static final Pattern KEY_PATTERN = Pattern.compile("[a-z0-9_-]{1," + KEY_MAX + "}");
 
+    /** {@code BalanceRepository} 経由の入金 (deposit / set の増加分) の対向口座。 */
+    public static final String LEGACY_SOURCE = "system:legacy_source";
+    /** {@code BalanceRepository} 経由の出金 (withdraw / set の減少分) の対向口座。 */
+    public static final String LEGACY_SINK = "system:legacy_sink";
+
+    public static final UUID LEGACY_SOURCE_UUID = uuidFromAlias(LEGACY_SOURCE);
+    public static final UUID LEGACY_SINK_UUID = uuidFromAlias(LEGACY_SINK);
+
     private Aliases() {}
 
     /**

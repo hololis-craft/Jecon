@@ -275,6 +275,10 @@ class VaultEconomy implements Economy {
                 new EconomyResponse(0, newBalance, EconomyResponse.ResponseType.NOT_IMPLEMENTED, "Account missing: " + missing.which());
             case TransferResult.InvalidAmount invalid ->
                 new EconomyResponse(0, newBalance, EconomyResponse.ResponseType.FAILURE, invalid.reason());
+            case TransferResult.Conflict ignored ->
+                // 競合し続けて中断した。残高は変わっていないので呼び出し元は再試行できる。
+                new EconomyResponse(0, newBalance, EconomyResponse.ResponseType.FAILURE,
+                    "Concurrent modification, please retry");
         };
     }
 

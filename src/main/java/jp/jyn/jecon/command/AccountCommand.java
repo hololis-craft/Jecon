@@ -224,6 +224,11 @@ public class AccountCommand {
                 "which", m.which().toString());
             case TransferResult.InvalidAmount ia -> message.sendInvalidAmount.toComponent(
                 "reason", ia.reason());
+            // Conflict は残高を読んでから差分を適用する setBalance 専用なので、
+            // このコマンド (transfer) からは返らない。専用メッセージキーを増やすと
+            // 既存インストールの message_*.yml に無い分が "null" になるため使い回す。
+            case TransferResult.Conflict ignored -> message.sendInvalidAmount.toComponent(
+                "reason", "concurrent modification, please retry");
         };
     }
 }

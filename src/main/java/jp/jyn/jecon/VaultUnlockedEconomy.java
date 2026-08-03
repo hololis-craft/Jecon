@@ -308,6 +308,9 @@ public class VaultUnlockedEconomy implements Economy {
                 new EconomyResponse(BigDecimal.ZERO, newBalance, EconomyResponse.ResponseType.FAILURE, "Account missing: " + missing.which());
             case TransferResult.InvalidAmount invalid ->
                 new EconomyResponse(BigDecimal.ZERO, newBalance, EconomyResponse.ResponseType.FAILURE, invalid.reason());
+            case TransferResult.Conflict ignored ->
+                new EconomyResponse(BigDecimal.ZERO, newBalance, EconomyResponse.ResponseType.FAILURE,
+                    "Concurrent modification, please retry");
         };
     }
 

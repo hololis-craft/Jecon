@@ -52,16 +52,24 @@ public class SyncRepository extends AbstractRepository {
 
     @Override
     protected boolean set(UUID uuid, long balance) {
-        // 差分を計算して transfer に翻訳する。
-        if (!hasAccount(uuid)) return false;
-        long current = getRaw(uuid).orElse(0L);
-        long diff = balance - current;
-        if (diff == 0) return true;
-        if (diff > 0) {
-            return transferSuccess(LEGACY_SOURCE_UUID, uuid, rawToDecimal(diff), "set");
-        } else {
-            return transferSuccess(uuid, LEGACY_SINK_UUID, rawToDecimal(-diff), "set");
+        if (transferService == null) {
+            // 起動途中の fallback 経路。
+            if (!hasAccount(uuid)) return false;
+            long diff = balance - getRaw(uuid).orElse(0L);
+            if (diff == 0) return true;
+            return diff > 0
+                ? legacyDirect(LEGACY_SOURCE_UUID, uuid, rawToDecimal(diff))
+                : legacyDirect(uuid, LEGACY_SINK_UUID, rawToDecimal(-diff));
         }
+        // 「現在の残高を読んで差分を出す」処理を自前でやるとトランザクション外の
+        // read-modify-write になり lost update する。TransferService 側の
+        // 楽観的並行制御に任せる。
+        TransferContext ctx = TransferContext.builder()
+            .source("legacy")
+            .metadata("legacy_method", "set")
+            .withOverdraft()
+            .build();
+        return transferService.setBalance(uuid, rawToDecimal(balance), ctx) instanceof TransferResult.Success;
     }
 
     @Override
