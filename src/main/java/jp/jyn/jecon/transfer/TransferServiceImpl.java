@@ -14,14 +14,16 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.OptionalLong;
+import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * {@link TransferService} の実装。単一 SQL トランザクションで残高更新と監査ログ INSERT を発行する
@@ -83,43 +85,62 @@ public class TransferServiceImpl implements TransferService {
             }
         }
 
-        // account.id の解決
-        Map<UUID, Integer> uuidToId = new LinkedHashMap<>();
-        for (LegEntry e : entries) {
-            for (UUID uuid : new UUID[]{e.leg.from(), e.leg.to()}) {
-                if (uuidToId.containsKey(uuid)) continue;
-                OptionalInt id = db.resolveId(uuid);
-                if (id.isEmpty()) {
-                    return new TransferResult.AccountMissing(uuid);
-                }
-                uuidToId.put(uuid, id.getAsInt());
-            }
-        }
-
-        return executeAtomic(entries, uuidToId, ctx);
+        // account.id の解決とロックはトランザクション内で行う（executeAtomic）。
+        // ここで解決してしまうと、口座削除と競合したときに TOCTOU になる。
+        return executeAtomic(entries, ctx);
     }
 
-    private TransferResult executeAtomic(List<LegEntry> entries, Map<UUID, Integer> uuidToId, TransferContext ctx) {
+    private TransferResult executeAtomic(List<LegEntry> entries, TransferContext ctx) {
         long[] amountsRaw = new long[entries.size()];
         for (int i = 0; i < entries.size(); i++) {
             amountsRaw[i] = decimalToRaw(entries.get(i).leg.amount());
         }
 
-        // 関与する account.id を昇順にロックする集合
-        List<Integer> lockOrder = new ArrayList<>(uuidToId.values());
-        Collections.sort(lockOrder);
+        // 登場順に重複を除いた endpoint 一覧
+        Set<UUID> endpoints = new LinkedHashSet<>();
+        for (LegEntry e : entries) {
+            endpoints.add(e.leg.from());
+            endpoints.add(e.leg.to());
+        }
 
-        AtomicReference<TransferResult.Success> success = new AtomicReference<>();
-        AtomicReference<TransferResult> earlyReturn = new AtomicReference<>();
-        Instant occurredAt = Instant.now();
-
+        TransferResult.Success success;
         try {
-            db.runInTransaction(connection -> {
+            success = db.inTransactionWithRetry(connection -> {
+                // 再試行されるので、トランザクション内で毎回取り直す
+                Instant occurredAt = Instant.now();
+
+                // 1) id を解決する（ロックはまだ取らない。ロック順序を決めるため）
+                Map<UUID, Integer> uuidToId = new LinkedHashMap<>();
+                Map<Integer, UUID> idToUuid = new HashMap<>();
+                for (UUID uuid : endpoints) {
+                    OptionalInt id = db.resolveId(connection, uuid);
+                    if (id.isEmpty()) {
+                        throw new AccountMissingSignal(uuid);
+                    }
+                    uuidToId.put(uuid, id.getAsInt());
+                    idToUuid.put(id.getAsInt(), uuid);
+                }
+
+                // 2) account.id 昇順で account 行 → balance 行をロックする。
+                //    AccountService.delete も同じ順序でロックするので、削除と交錯しない。
+                List<Integer> lockOrder = new ArrayList<>(new LinkedHashSet<>(uuidToId.values()));
+                Collections.sort(lockOrder);
+                for (int id : lockOrder) {
+                    if (!db.lockAccountRow(connection, id)) {
+                        throw new AccountMissingSignal(idToUuid.get(id));
+                    }
+                }
                 Map<Integer, Long> balances = new HashMap<>();
                 for (int id : lockOrder) {
-                    long balance = db.selectBalanceForUpdate(connection, id).orElse(0L);
-                    balances.put(id, balance);
+                    OptionalLong balance = db.selectBalanceForUpdate(connection, id);
+                    if (balance.isEmpty()) {
+                        // account 行はあるが経済アカウントを持っていない
+                        throw new AccountMissingSignal(idToUuid.get(id));
+                    }
+                    balances.put(id, balance.getAsLong());
                 }
+
+                // 3) 各 leg を適用する
                 for (int i = 0; i < entries.size(); i++) {
                     LegEntry entry = entries.get(i);
                     long raw = amountsRaw[i];
@@ -135,11 +156,15 @@ public class TransferServiceImpl implements TransferService {
                     balances.put(toId, balances.get(toId) + raw);
                 }
                 for (Map.Entry<Integer, Long> e : balances.entrySet()) {
-                    db.setBalanceInTx(connection, e.getKey(), e.getValue());
+                    if (!db.setBalanceInTx(connection, e.getKey(), e.getValue())) {
+                        throw new AccountMissingSignal(idToUuid.get(e.getKey()));
+                    }
                 }
 
+                // 4) 監査ログ
                 List<AppliedLeg> applied = new ArrayList<>(entries.size());
                 Long batchId = null;
+                long firstId = -1L;
                 for (int i = 0; i < entries.size(); i++) {
                     LegEntry entry = entries.get(i);
                     int fromId = uuidToId.get(entry.leg.from());
@@ -149,19 +174,15 @@ public class TransferServiceImpl implements TransferService {
                         ctx.actor(), MetadataJson.encode(ctx.metadata()));
                     if (batchId == null) {
                         // 最初の leg の id を batch_id として採用し、以降の leg にも共通付与する。
-                        // 最初の leg は自己参照になるため、必要なら後段で UPDATE する。
+                        // 最初の leg は自己参照になるため、後段で UPDATE する。
                         batchId = id;
+                        firstId = id;
                         db.updateTransactionLogBatchId(connection, id, id);
                     }
                     applied.add(new AppliedLeg(entry.leg.from(), entry.leg.to(), entry.leg.amount(), entry.label));
-                    if (i == 0) {
-                        success.set(new TransferResult.Success(id, occurredAt, applied));
-                    }
                 }
 
-                // Success の legs は builder 側で全 leg 反映したい
-                TransferResult.Success first = success.get();
-                success.set(new TransferResult.Success(first.transferId(), occurredAt, List.copyOf(applied)));
+                return new TransferResult.Success(firstId, occurredAt, List.copyOf(applied));
             });
         } catch (InsufficientFundsSignal signal) {
             return new TransferResult.InsufficientFunds(
@@ -169,19 +190,18 @@ public class TransferServiceImpl implements TransferService {
                 BigDecimal.valueOf(signal.available).scaleByPowerOfTen(-FRACTIONAL_DIGITS),
                 BigDecimal.valueOf(signal.required).scaleByPowerOfTen(-FRACTIONAL_DIGITS)
             );
+        } catch (AccountMissingSignal signal) {
+            return new TransferResult.AccountMissing(signal.account);
         }
 
-        TransferResult early = earlyReturn.get();
-        if (early != null) return early;
-
-        TransferResult.Success s = success.get();
         // Bukkit event 発火 (トランザクション外)
         plugin.getServer().getPluginManager().callEvent(
             new JeconTransferCompletedEvent(
-                s.transferId(), s.occurredAt(), ctx.source(), ctx.metadata(), ctx.actor(), s.legs()
+                success.transferId(), success.occurredAt(), ctx.source(), ctx.metadata(),
+                ctx.actor(), success.legs()
             )
         );
-        return s;
+        return success;
     }
 
     private TransferResult validateAmount(BigDecimal amount) {
@@ -307,6 +327,16 @@ public class TransferServiceImpl implements TransferService {
         @Override
         public boolean hasPermission(UUID account, UUID member, jp.jyn.jecon.account.AccountPermission perm) {
             return accountService.hasPermission(account, member, perm);
+        }
+    }
+
+    /** 口座が存在しない（または削除された）ことを transactional escape として使う。 */
+    private static final class AccountMissingSignal extends RuntimeException {
+        final UUID account;
+
+        AccountMissingSignal(UUID account) {
+            super("account missing");
+            this.account = account;
         }
     }
 

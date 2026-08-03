@@ -87,22 +87,28 @@ public class SyncRepository extends AbstractRepository {
 
     @Override
     protected boolean createAccount(UUID uuid, long balance) {
-        if (hasAccount(uuid)) return false;
-        // account 行を確保してから balance を 0 で作る。
-        int id = db.getOrCreatePlayerId(uuid);
-        if (!db.createBalance(id, 0L)) {
-            // 並行で balance 行ができていた場合。
-            return false;
-        }
+        // account 行の確保と balance 行の作成を 1 トランザクションで行う。
+        // 並行して同じ口座を作ろうとした側は createBalance が false を返して負ける。
+        boolean created = db.inTransactionWithRetry(connection -> {
+            int id = db.getOrCreatePlayerId(connection, uuid);
+            return db.createBalance(connection, id, 0L);
+        });
+        if (!created) return false;
         if (balance == 0) return true;
+        // 初期残高は監査ログに残したいので通常の振替として流す。
         return transferSuccess(LEGACY_SOURCE_UUID, uuid, rawToDecimal(balance), "createAccount");
     }
 
     @Override
     public boolean removeAccount(UUID uuid) {
-        OptionalInt id = db.resolveId(uuid);
-        if (id.isEmpty()) return false;
-        return db.removeBalance(id.getAsInt());
+        // balance 行だけを消す（account 行は UUID↔id の対応として残す）。
+        // 並行する振替と交錯しないよう account 行のロック下で行う。
+        return db.inTransactionWithRetry(connection -> {
+            OptionalInt id = db.resolveId(connection, uuid);
+            if (id.isEmpty()) return false;
+            if (!db.lockAccountRow(connection, id.getAsInt())) return false;
+            return db.removeBalance(connection, id.getAsInt());
+        });
     }
 
     private boolean transferSuccess(UUID from, UUID to, BigDecimal amount, String legacyMethod) {

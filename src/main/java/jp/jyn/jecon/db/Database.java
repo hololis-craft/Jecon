@@ -560,24 +560,44 @@ public abstract class Database {
     }
 
     /**
-     * トランザクション内の残高上書き。存在しない行は INSERT する（0 balance の口座に対する
-     * 最初の書き込みで自動作成）。
+     * {@code account} 行をロックし、存在するかを返す。
+     *
+     * <p>口座に対する一連の操作（残高更新・メンバー権限更新・削除）を直列化するための
+     * 単一のロック地点。{@code account} 行は必ず存在するので、MySQL でも
+     * gap lock ではなく素の行ロックになる（gap lock 同士は競合しないため、
+     * 存在しない行を {@code FOR UPDATE} してから INSERT するとデッドロックし得る）。
+     *
+     * @return 行が存在すれば true。false の場合ロックは取得されていない
      */
-    public void setBalanceInTx(Connection connection, int id, long balance) throws SQLException {
+    public boolean lockAccountRow(Connection connection, int id) throws SQLException {
+        String sql = supportsSelectForUpdate()
+            ? "SELECT `id` FROM `account` WHERE `id`=? FOR UPDATE"
+            : "SELECT `id` FROM `account` WHERE `id`=?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, id);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    /**
+     * トランザクション内の残高上書き。
+     *
+     * <p><b>行が存在しなければ何もせず false を返す。</b>以前は INSERT で自動作成していたが、
+     * それだと口座削除と並行した振替が {@code account} 行の無い {@code balance} 行を
+     * 復活させてしまう（孤児行）。{@code balance} 行の生成は明示的な口座作成経路
+     * ({@link #createBalance}) だけに限定する。
+     *
+     * @return 更新できたら true
+     */
+    public boolean setBalanceInTx(Connection connection, int id, long balance) throws SQLException {
         try (PreparedStatement update = connection.prepareStatement(
             "UPDATE `balance` SET `balance`=? WHERE `id`=?"
         )) {
             update.setLong(1, balance);
             update.setInt(2, id);
-            if (update.executeUpdate() == 0) {
-                try (PreparedStatement insert = connection.prepareStatement(
-                    "INSERT INTO `balance` (`id`, `balance`) VALUES (?, ?)"
-                )) {
-                    insert.setInt(1, id);
-                    insert.setLong(2, balance);
-                    insert.executeUpdate();
-                }
-            }
+            return update.executeUpdate() != 0;
         }
     }
 
