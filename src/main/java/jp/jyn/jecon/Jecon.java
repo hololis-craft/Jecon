@@ -9,6 +9,7 @@ import jp.jyn.jecon.account.Account;
 import jp.jyn.jecon.account.AccountService;
 import jp.jyn.jecon.account.AccountServiceImpl;
 import jp.jyn.jecon.command.AccountCommand;
+import jp.jyn.jecon.concurrent.BukkitMainThreadBridge;
 import jp.jyn.jecon.command.Convert;
 import jp.jyn.jecon.command.Create;
 import jp.jyn.jecon.command.Give;
@@ -23,6 +24,7 @@ import jp.jyn.jecon.command.Version;
 import jp.jyn.jecon.config.ConfigLoader;
 import jp.jyn.jecon.config.MainConfig;
 import jp.jyn.jecon.db.Database;
+import jp.jyn.jecon.event.QueuedEventDispatcher;
 import jp.jyn.jecon.event.JeconAccountCreatedEvent;
 import jp.jyn.jecon.event.JeconAccountRemovedEvent;
 import jp.jyn.jecon.modifier.ModifierRegistry;
@@ -42,6 +44,7 @@ import org.bukkit.event.server.PluginEnableEvent;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.math.BigDecimal;
 import java.util.ArrayDeque;
@@ -60,6 +63,7 @@ public class Jecon extends JavaPlugin {
     private TransferService transferService;
     private ModifierRegistry modifierRegistry;
     private TransactionQueryService transactionQueryService;
+    private QueuedEventDispatcher eventDispatcher;
     private final JeconServices services = new JeconServices();
 
     // Fields elevated for cross-reload access
@@ -93,9 +97,25 @@ public class Jecon extends JavaPlugin {
         // AccountService (ADR-0011 / ADR-0013)
         accountService = new AccountServiceImpl(db, new AccountLifecycleAdapter());
 
+        // event はキューに積んで毎 tick メインスレッドから発火する。
+        // 振替が非メインスレッドから来ても同期 event の契約を守れるようにするため。
+        eventDispatcher = new QueuedEventDispatcher(
+            event -> getServer().getPluginManager().callEvent(event),
+            (event, error) -> getLogger().log(java.util.logging.Level.SEVERE,
+                "Failed to dispatch " + event.getEventName(), error));
+        BukkitTask dispatcherTask = getServer().getScheduler().runTaskTimer(this, eventDispatcher, 1L, 1L);
+        destructor.addFirst(() -> {
+            dispatcherTask.cancel();
+            // scheduler が止まった後に残っている分を、メインスレッドである
+            // onDisable の中で発火しきる。
+            eventDispatcher.drain();
+            eventDispatcher = null;
+        });
+
         // Modifier registry と TransferService (ADR-0004 / 03-transfer-api.md / 05-modifier-pipeline.md)
         modifierRegistry = new ModifierRegistryImpl();
-        transferService = new TransferServiceImpl(this, db, accountService, modifierRegistry);
+        transferService = new TransferServiceImpl(db, accountService, modifierRegistry,
+            eventDispatcher, new BukkitMainThreadBridge(this), getLogger());
 
         // 集計クエリ (04-context-and-log.md)
         transactionQueryService = new TransactionQueryServiceImpl(db);
@@ -282,9 +302,7 @@ public class Jecon extends JavaPlugin {
     private class AccountLifecycleAdapter implements AccountServiceImpl.AccountLifecycleObserver {
         @Override
         public void onAccountCreated(Account account) {
-            getServer().getPluginManager().callEvent(
-                new JeconAccountCreatedEvent(account, BigDecimal.ZERO)
-            );
+            post(new JeconAccountCreatedEvent(account, BigDecimal.ZERO));
         }
 
         @Override
@@ -292,9 +310,15 @@ public class Jecon extends JavaPlugin {
             BigDecimal balance = repository == null
                 ? BigDecimal.ZERO
                 : repository.getDecimal(account.uuid()).orElse(BigDecimal.ZERO);
-            getServer().getPluginManager().callEvent(
-                new JeconAccountRemovedEvent(account, balance)
-            );
+            post(new JeconAccountRemovedEvent(account, balance));
+        }
+
+        private void post(org.bukkit.event.Event event) {
+            // ensureLegacyAccounts() は dispatcher の生成前に走り得るので null を許容する。
+            QueuedEventDispatcher dispatcher = eventDispatcher;
+            if (dispatcher != null) {
+                dispatcher.post(event);
+            }
         }
     }
 

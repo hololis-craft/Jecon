@@ -1,8 +1,11 @@
 package jp.jyn.jecon.transfer;
 
-import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.account.AccountService;
+import jp.jyn.jecon.account.Aliases;
+import jp.jyn.jecon.concurrent.MainThreadBridge;
+import jp.jyn.jecon.concurrent.MainThreadUnavailableException;
 import jp.jyn.jecon.db.Database;
+import jp.jyn.jecon.event.EventDispatcher;
 import jp.jyn.jecon.event.JeconTransferCompletedEvent;
 import jp.jyn.jecon.modifier.ModifiedTransfer;
 import jp.jyn.jecon.modifier.ModifierRegistry;
@@ -14,14 +17,17 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.OptionalLong;
+import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.logging.Logger;
 
 /**
  * {@link TransferService} の実装。単一 SQL トランザクションで残高更新と監査ログ INSERT を発行する
@@ -32,18 +38,29 @@ public class TransferServiceImpl implements TransferService {
     private static final int FRACTIONAL_DIGITS = 2;
     private static final String LEG_LABEL_PRIMARY = "primary";
     private static final int MODIFIER_DEPTH_LIMIT = 5;
+    /** {@link #setBalance} の楽観的リトライ上限。 */
+    private static final int CAS_ATTEMPTS = 5;
+    /** 差分 0 で実際には書き込みが起きなかった場合の transferId。 */
+    private static final long NO_OP_TRANSFER_ID = -1L;
+    /** メインスレッドへ pipeline を回せなかった場合の Veto 元 id。 */
+    private static final String MAIN_THREAD_MODIFIER_ID = "jecon:main-thread-bridge";
 
-    private final Jecon plugin;
     private final Database db;
     private final AccountService accountService;
     private final ModifierRegistry modifierRegistry;
+    private final EventDispatcher events;
+    private final MainThreadBridge mainThread;
+    private final Logger logger;
 
-    public TransferServiceImpl(Jecon plugin, Database db, AccountService accountService,
-                               ModifierRegistry modifierRegistry) {
-        this.plugin = plugin;
+    public TransferServiceImpl(Database db, AccountService accountService,
+                               ModifierRegistry modifierRegistry, EventDispatcher events,
+                               MainThreadBridge mainThread, Logger logger) {
         this.db = db;
         this.accountService = accountService;
         this.modifierRegistry = modifierRegistry;
+        this.events = events;
+        this.mainThread = mainThread;
+        this.logger = logger;
     }
 
     @Override
@@ -68,58 +85,187 @@ public class TransferServiceImpl implements TransferService {
             }
         }
 
-        // Modifier pipeline
         List<LegEntry> entries = new ArrayList<>();
         for (TransferLeg leg : legs) {
             entries.add(new LegEntry(leg, LEG_LABEL_PRIMARY));
         }
 
+        TransferResult early = runModifiers(entries, ctx);
+        if (early != null) {
+            return early;
+        }
+
+        // account.id の解決とロックはトランザクション内で行う（executeAtomic）。
+        // ここで解決してしまうと、口座削除と競合したときに TOCTOU になる。
+        return executeAtomic(entries, ctx, Map.of());
+    }
+
+    @Override
+    public TransferResult setBalance(UUID account, BigDecimal target, TransferContext ctx) {
+        Objects.requireNonNull(account, "account");
+        Objects.requireNonNull(ctx, "ctx");
+        if (target == null) {
+            return new TransferResult.InvalidAmount(null, "target is null");
+        }
+        if (target.scale() > FRACTIONAL_DIGITS) {
+            return new TransferResult.InvalidAmount(target, "amount scale exceeds " + FRACTIONAL_DIGITS);
+        }
+        long targetRaw = decimalToRaw(target);
+
+        // 楽観的並行制御。「残高を読む → 差分を Modifier pipeline に通す → 適用する」の
+        // 一連の流れを、読んだ残高がトランザクション内で変わっていなければ確定させる。
+        // 変わっていたら pipeline ごとやり直す（modifier に見せる金額を正しく保つため）。
+        for (int attempt = 1; attempt <= CAS_ATTEMPTS; attempt++) {
+            OptionalLong observed = readBalance(account);
+            if (observed.isEmpty()) {
+                return new TransferResult.AccountMissing(account);
+            }
+            long diff = targetRaw - observed.getAsLong();
+            if (diff == 0) {
+                return new TransferResult.Success(NO_OP_TRANSFER_ID, Instant.now(), List.of());
+            }
+
+            TransferLeg leg = diff > 0
+                ? new TransferLeg(Aliases.LEGACY_SOURCE_UUID, account, rawToDecimal(diff))
+                : new TransferLeg(account, Aliases.LEGACY_SINK_UUID, rawToDecimal(-diff));
+
+            List<LegEntry> entries = new ArrayList<>();
+            entries.add(new LegEntry(leg, LEG_LABEL_PRIMARY));
+            TransferResult early = runModifiers(entries, ctx);
+            if (early != null) {
+                return early;
+            }
+
+            try {
+                return executeAtomic(entries, ctx, Map.of(account, observed.getAsLong()));
+            } catch (StaleReadSignal ignored) {
+                // 読んだ残高が変わっていた。差分を作り直す。
+            }
+        }
+        return new TransferResult.Conflict(account);
+    }
+
+    private OptionalLong readBalance(UUID account) {
+        OptionalInt id = db.resolveId(account);
+        if (id.isEmpty()) {
+            return OptionalLong.empty();
+        }
+        return db.getBalance(id.getAsInt());
+    }
+
+    /**
+     * Modifier pipeline を回す。
+     *
+     * @return 非 null なら以降の処理を行わずその結果を返す（Veto など）
+     */
+    private TransferResult runModifiers(List<LegEntry> entries, TransferContext ctx) {
+        List<TransferModifier> registered = modifierRegistry.registered();
+        if (registered.isEmpty()) {
+            // 登録が無ければスレッド判定すら不要
+            return null;
+        }
+
+        if (requiresMainThread(registered) && !mainThread.isMainThread()) {
+            // modifier が Bukkit API を触る可能性があるので pipeline だけメインスレッドで回す。
+            // Future.get() が entries への変更の可視性も保証する。
+            try {
+                return mainThread.callSync(() -> runPipeline(registered, entries, ctx));
+            } catch (MainThreadUnavailableException e) {
+                logger.warning("Could not run the modifier pipeline on the main thread, " +
+                    "rejecting the transfer: " + e.getMessage());
+                return new TransferResult.Vetoed(MAIN_THREAD_MODIFIER_ID,
+                    "modifiers could not run on the main thread");
+            }
+        }
+        return runPipeline(registered, entries, ctx);
+    }
+
+    private static boolean requiresMainThread(List<TransferModifier> modifiers) {
+        for (TransferModifier modifier : modifiers) {
+            if (!modifier.isThreadSafe()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private TransferResult runPipeline(List<TransferModifier> modifiers, List<LegEntry> entries,
+                                       TransferContext ctx) {
         ProbeImpl probe = new ProbeImpl(entries, ctx.overdraft());
-        for (TransferModifier modifier : modifierRegistry.registered()) {
+        for (TransferModifier modifier : modifiers) {
             ModifiedTransfer result = safelyModify(modifier, ctx, probe);
             TransferResult applied = applyModifierResult(modifier, result, entries, 0);
             if (applied != null) {
                 return applied;
             }
         }
-
-        // account.id の解決
-        Map<UUID, Integer> uuidToId = new LinkedHashMap<>();
-        for (LegEntry e : entries) {
-            for (UUID uuid : new UUID[]{e.leg.from(), e.leg.to()}) {
-                if (uuidToId.containsKey(uuid)) continue;
-                OptionalInt id = db.resolveId(uuid);
-                if (id.isEmpty()) {
-                    return new TransferResult.AccountMissing(uuid);
-                }
-                uuidToId.put(uuid, id.getAsInt());
-            }
-        }
-
-        return executeAtomic(entries, uuidToId, ctx);
+        return null;
     }
 
-    private TransferResult executeAtomic(List<LegEntry> entries, Map<UUID, Integer> uuidToId, TransferContext ctx) {
+    /**
+     * @param expectedBalances 楽観的並行制御用。指定された口座の残高がロック取得後に
+     *                         この値と異なっていれば {@link StaleReadSignal} を投げる
+     */
+    private TransferResult executeAtomic(List<LegEntry> entries, TransferContext ctx,
+                                         Map<UUID, Long> expectedBalances) {
         long[] amountsRaw = new long[entries.size()];
         for (int i = 0; i < entries.size(); i++) {
             amountsRaw[i] = decimalToRaw(entries.get(i).leg.amount());
         }
 
-        // 関与する account.id を昇順にロックする集合
-        List<Integer> lockOrder = new ArrayList<>(uuidToId.values());
-        Collections.sort(lockOrder);
+        // 登場順に重複を除いた endpoint 一覧
+        Set<UUID> endpoints = new LinkedHashSet<>();
+        for (LegEntry e : entries) {
+            endpoints.add(e.leg.from());
+            endpoints.add(e.leg.to());
+        }
 
-        AtomicReference<TransferResult.Success> success = new AtomicReference<>();
-        AtomicReference<TransferResult> earlyReturn = new AtomicReference<>();
-        Instant occurredAt = Instant.now();
-
+        TransferResult.Success success;
         try {
-            db.runInTransaction(connection -> {
+            success = db.inTransactionWithRetry(connection -> {
+                // 再試行されるので、トランザクション内で毎回取り直す
+                Instant occurredAt = Instant.now();
+
+                // 1) id を解決する（ロックはまだ取らない。ロック順序を決めるため）
+                Map<UUID, Integer> uuidToId = new LinkedHashMap<>();
+                Map<Integer, UUID> idToUuid = new HashMap<>();
+                for (UUID uuid : endpoints) {
+                    OptionalInt id = db.resolveId(connection, uuid);
+                    if (id.isEmpty()) {
+                        throw new AccountMissingSignal(uuid);
+                    }
+                    uuidToId.put(uuid, id.getAsInt());
+                    idToUuid.put(id.getAsInt(), uuid);
+                }
+
+                // 2) account.id 昇順で account 行 → balance 行をロックする。
+                //    AccountService.delete も同じ順序でロックするので、削除と交錯しない。
+                List<Integer> lockOrder = new ArrayList<>(new LinkedHashSet<>(uuidToId.values()));
+                Collections.sort(lockOrder);
+                for (int id : lockOrder) {
+                    if (!db.lockAccountRow(connection, id)) {
+                        throw new AccountMissingSignal(idToUuid.get(id));
+                    }
+                }
                 Map<Integer, Long> balances = new HashMap<>();
                 for (int id : lockOrder) {
-                    long balance = db.selectBalanceForUpdate(connection, id).orElse(0L);
-                    balances.put(id, balance);
+                    OptionalLong balance = db.selectBalanceForUpdate(connection, id);
+                    if (balance.isEmpty()) {
+                        // account 行はあるが経済アカウントを持っていない
+                        throw new AccountMissingSignal(idToUuid.get(id));
+                    }
+                    balances.put(id, balance.getAsLong());
                 }
+
+                // ロックを取ってから期待値と比較する（CAS）
+                for (Map.Entry<UUID, Long> expected : expectedBalances.entrySet()) {
+                    long actual = balances.get(uuidToId.get(expected.getKey()));
+                    if (actual != expected.getValue()) {
+                        throw new StaleReadSignal();
+                    }
+                }
+
+                // 3) 各 leg を適用する
                 for (int i = 0; i < entries.size(); i++) {
                     LegEntry entry = entries.get(i);
                     long raw = amountsRaw[i];
@@ -135,11 +281,15 @@ public class TransferServiceImpl implements TransferService {
                     balances.put(toId, balances.get(toId) + raw);
                 }
                 for (Map.Entry<Integer, Long> e : balances.entrySet()) {
-                    db.setBalanceInTx(connection, e.getKey(), e.getValue());
+                    if (!db.setBalanceInTx(connection, e.getKey(), e.getValue())) {
+                        throw new AccountMissingSignal(idToUuid.get(e.getKey()));
+                    }
                 }
 
+                // 4) 監査ログ
                 List<AppliedLeg> applied = new ArrayList<>(entries.size());
                 Long batchId = null;
+                long firstId = -1L;
                 for (int i = 0; i < entries.size(); i++) {
                     LegEntry entry = entries.get(i);
                     int fromId = uuidToId.get(entry.leg.from());
@@ -149,19 +299,15 @@ public class TransferServiceImpl implements TransferService {
                         ctx.actor(), MetadataJson.encode(ctx.metadata()));
                     if (batchId == null) {
                         // 最初の leg の id を batch_id として採用し、以降の leg にも共通付与する。
-                        // 最初の leg は自己参照になるため、必要なら後段で UPDATE する。
+                        // 最初の leg は自己参照になるため、後段で UPDATE する。
                         batchId = id;
+                        firstId = id;
                         db.updateTransactionLogBatchId(connection, id, id);
                     }
                     applied.add(new AppliedLeg(entry.leg.from(), entry.leg.to(), entry.leg.amount(), entry.label));
-                    if (i == 0) {
-                        success.set(new TransferResult.Success(id, occurredAt, applied));
-                    }
                 }
 
-                // Success の legs は builder 側で全 leg 反映したい
-                TransferResult.Success first = success.get();
-                success.set(new TransferResult.Success(first.transferId(), occurredAt, List.copyOf(applied)));
+                return new TransferResult.Success(firstId, occurredAt, List.copyOf(applied));
             });
         } catch (InsufficientFundsSignal signal) {
             return new TransferResult.InsufficientFunds(
@@ -169,19 +315,16 @@ public class TransferServiceImpl implements TransferService {
                 BigDecimal.valueOf(signal.available).scaleByPowerOfTen(-FRACTIONAL_DIGITS),
                 BigDecimal.valueOf(signal.required).scaleByPowerOfTen(-FRACTIONAL_DIGITS)
             );
+        } catch (AccountMissingSignal signal) {
+            return new TransferResult.AccountMissing(signal.account);
         }
 
-        TransferResult early = earlyReturn.get();
-        if (early != null) return early;
-
-        TransferResult.Success s = success.get();
-        // Bukkit event 発火 (トランザクション外)
-        plugin.getServer().getPluginManager().callEvent(
-            new JeconTransferCompletedEvent(
-                s.transferId(), s.occurredAt(), ctx.source(), ctx.metadata(), ctx.actor(), s.legs()
-            )
-        );
-        return s;
+        // event 発火はトランザクションの外。再試行されると二重発火するため中に入れてはいけない。
+        events.post(new JeconTransferCompletedEvent(
+            success.transferId(), success.occurredAt(), ctx.source(), ctx.metadata(),
+            ctx.actor(), success.legs()
+        ));
+        return success;
     }
 
     private TransferResult validateAmount(BigDecimal amount) {
@@ -202,7 +345,7 @@ public class TransferServiceImpl implements TransferService {
             ModifiedTransfer r = modifier.modify(ctx, probe);
             return r == null ? new ModifiedTransfer.Pass() : r;
         } catch (RuntimeException e) {
-            plugin.getLogger().warning("Modifier '" + modifier.getId() + "' threw, treating as Pass: " + e.getMessage());
+            logger.warning("Modifier '" + modifier.getId() + "' threw, treating as Pass: " + e.getMessage());
             return new ModifiedTransfer.Pass();
         }
     }
@@ -226,7 +369,7 @@ public class TransferServiceImpl implements TransferService {
         }
         if (result instanceof ModifiedTransfer.AdditionalLegs additional) {
             if (depth >= MODIFIER_DEPTH_LIMIT) {
-                plugin.getLogger().warning("Modifier depth limit reached; ignoring additional legs from " + modifier.getId());
+                logger.warning("Modifier depth limit reached; ignoring additional legs from " + modifier.getId());
                 return null;
             }
             String label = additional.label() == null ? modifier.getId() : additional.label();
@@ -307,6 +450,26 @@ public class TransferServiceImpl implements TransferService {
         @Override
         public boolean hasPermission(UUID account, UUID member, jp.jyn.jecon.account.AccountPermission perm) {
             return accountService.hasPermission(account, member, perm);
+        }
+    }
+
+    /**
+     * 楽観的並行制御の再読み込みを促す。{@code inTransaction} は RuntimeException を
+     * 包まずに伝播させるので、そのまま呼び出し元のループまで届く。
+     */
+    private static final class StaleReadSignal extends RuntimeException {
+        StaleReadSignal() {
+            super("balance changed between read and lock", null, false, false);
+        }
+    }
+
+    /** 口座が存在しない（または削除された）ことを transactional escape として使う。 */
+    private static final class AccountMissingSignal extends RuntimeException {
+        final UUID account;
+
+        AccountMissingSignal(UUID account) {
+            super("account missing");
+            this.account = account;
         }
     }
 

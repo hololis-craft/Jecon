@@ -40,14 +40,23 @@ database:
   type: sqlite
   sqlite:
     file: "jecon.db"
+    # Executed on every new pooled connection. The default sets a busy timeout
+    # so that concurrent writers wait for each other instead of failing.
+    # Jecon also switches the database to WAL mode on startup, and starts every
+    # write transaction with BEGIN IMMEDIATE (a deferred BEGIN would have to
+    # upgrade a read lock to a write lock, which SQLite fails immediately
+    # without honouring the busy timeout).
+    #init: "PRAGMA busy_timeout=5000"
   mysql:
     host: "localhost:3306"
     name: "jecon"
     username: "root"
     password: "your_mysql_password"
-    # It is recommended to stop caching when using MySQL
-    # If you have caches in your application, database cache is "wasted memory".
-    init: "SET SESSION query_cache_type=0"
+    # Executed on every new pooled connection.
+    # NOTE: do not put "SET SESSION query_cache_type=0" here. The query cache was
+    # removed in MySQL 8.0, so that statement fails with "Unknown system variable",
+    # and a failing init statement makes the connection pool refuse to start.
+    init: "/* Jecon */SELECT 1"
     properties:
       "useSSL": "false"
       # encoding
@@ -73,4 +82,4 @@ database:
     idleTimeout: -1
 
 # Don't touch
-version: 7
+version: 8

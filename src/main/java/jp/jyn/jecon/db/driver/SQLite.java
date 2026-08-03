@@ -1,7 +1,6 @@
 package jp.jyn.jecon.db.driver;
 
 import com.zaxxer.hikari.HikariDataSource;
-import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.db.DBMigrationUtils;
 import jp.jyn.jecon.db.Database;
 
@@ -15,17 +14,112 @@ import java.util.Set;
 import java.util.logging.Logger;
 
 public class SQLite extends Database {
-    public SQLite(HikariDataSource hikari) {
-        super(hikari);
+    public SQLite(HikariDataSource hikari, Logger logger) {
+        super(hikari, logger);
     }
+
+    /** {@code SQLITE_CONSTRAINT}。拡張コードは {@code 19 | (n << 8)} なので下位 1 バイトで判定する。 */
+    private static final int SQLITE_CONSTRAINT = 19;
 
     @Override
     protected boolean supportsSelectForUpdate() {
         return false;
     }
 
+    /** {@code SQLITE_BUSY} / {@code SQLITE_LOCKED}。write lock が取れなかった場合。 */
+    private static final int SQLITE_BUSY = 5;
+    private static final int SQLITE_LOCKED = 6;
+
+    @Override
+    protected boolean isConstraintViolation(SQLException e) {
+        // sqlite-jdbc は SQLState を設定せず vendor code のみを返す。
+        if ((e.getErrorCode() & 0xFF) == SQLITE_CONSTRAINT) {
+            return true;
+        }
+        return super.isConstraintViolation(e);
+    }
+
+    @Override
+    protected boolean isRetryable(SQLException e) {
+        int primary = e.getErrorCode() & 0xFF;
+        return primary == SQLITE_BUSY || primary == SQLITE_LOCKED;
+    }
+
+    /**
+     * {@code BEGIN IMMEDIATE} でトランザクションを開始する。
+     *
+     * <p>{@code setAutoCommit(false)} は deferred BEGIN になるため、SELECT で read lock を
+     * 取ってから UPDATE で write lock に昇格する形になる。この昇格はデッドロックし得るので
+     * SQLite は busy handler を呼ばずに即 {@code SQLITE_BUSY} を返す（busy_timeout が効かない）。
+     * 最初から write lock を取れば待ち合わせで解決できる。
+     *
+     * <p>autoCommit は true のまま維持し、トランザクション境界は生 SQL で制御する。
+     * {@code setAutoCommit(false)} と併用すると driver 自身の BEGIN と二重になる。
+     */
+    @Override
+    protected void beginTx(Connection connection) throws SQLException {
+        execute(connection, "BEGIN IMMEDIATE");
+    }
+
+    @Override
+    protected void commitTx(Connection connection) throws SQLException {
+        execute(connection, "COMMIT");
+    }
+
+    @Override
+    protected void rollbackTx(Connection connection) throws SQLException {
+        execute(connection, "ROLLBACK");
+    }
+
+    private static void execute(Connection connection, String sql) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute(sql);
+        }
+    }
+
+    private static final String MEMBER_INSERT =
+        "INSERT INTO `account_member` (`account_id`, `member_uuid`, `permissions`) VALUES (?,?,?)";
+    private static final String MEMBER_CONFLICT = " ON CONFLICT(`account_id`,`member_uuid`) ";
+
+    @Override
+    protected String sqlMemberSet() {
+        return MEMBER_INSERT + MEMBER_CONFLICT + "DO UPDATE SET `permissions`=excluded.`permissions`";
+    }
+
+    @Override
+    protected String sqlMemberOr() {
+        return MEMBER_INSERT + MEMBER_CONFLICT
+            + "DO UPDATE SET `permissions`=`account_member`.`permissions`|excluded.`permissions`";
+    }
+
+    @Override
+    protected String sqlMemberAndNot() {
+        return MEMBER_INSERT + MEMBER_CONFLICT
+            + "DO UPDATE SET `permissions`=`account_member`.`permissions`&~?";
+    }
+
+    /**
+     * WAL に切り替える。reader が writer をブロックしなくなるので、複数接続から
+     * 並行アクセスする前提では必須。DB ファイルに永続する設定なので毎回設定しても無害。
+     */
+    private void enableWriteAheadLog() {
+        try (Connection connection = hikari.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("PRAGMA journal_mode=WAL")) {
+            String mode = rs.next() ? rs.getString(1) : "?";
+            if (!"wal".equalsIgnoreCase(mode)) {
+                // ネットワークファイルシステム上などでは WAL に切り替えられないことがある
+                logger.warning("Could not enable SQLite WAL mode (journal_mode=" + mode + "). " +
+                    "Concurrent access will serialize more aggressively.");
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     @Override
     protected void createTable() {
+        enableWriteAheadLog();
         try (Connection connection = hikari.getConnection();
              Statement statement = connection.createStatement()) {
             statement.executeUpdate(
@@ -100,7 +194,6 @@ public class SQLite extends Database {
             return;
         }
 
-        Logger logger = Jecon.getInstance().getLogger();
         logger.info("Migrate SQLite");
 
         if ("1".equals(version)) {
@@ -186,7 +279,6 @@ public class SQLite extends Database {
      * balance はスキーマ変更が無いので touch しない。
      */
     private void v3to4() {
-        Logger logger = Jecon.getInstance().getLogger();
         logger.info("Migrating account/transaction_log to v4 schema");
         try (Connection connection = hikari.getConnection()) {
             connection.setAutoCommit(false);

@@ -1,6 +1,6 @@
 package jp.jyn.jecon.services;
 
-import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.util.NoSuchElementException;
 
@@ -12,7 +12,13 @@ import java.util.NoSuchElementException;
  * disable 中に取得したインスタンスを持ち回さないこと。
  */
 public class JeconServices {
-    private final Map<Class<?>, Object> registry = new HashMap<>();
+    /**
+     * {@code get()} は任意のスレッドから呼ばれ得るので並行 Map を使う。
+     *
+     * <p>reload 中の一瞬だけ service が消える状態を作らないよう、{@code clear()} は
+     * {@code onDisable} からのみ呼ばれる前提。
+     */
+    private final Map<Class<?>, Object> registry = new ConcurrentHashMap<>();
 
     public <T> void register(Class<T> serviceType, T impl) {
         registry.put(serviceType, impl);

@@ -7,7 +7,10 @@ import java.util.logging.Logger;
 
 public class MainMigration {
     private final static String FILE = "config.yml";
-    private final static int CURRENT_VERSION = 7;
+    private final static int CURRENT_VERSION = 8;
+
+    /** MySQL 8.0 で使えなくなった init 文の代替（無害な ping）。 */
+    private final static String SAFE_MYSQL_INIT = "/* Jecon */SELECT 1";
 
     private MainMigration() {}
 
@@ -35,6 +38,8 @@ public class MainMigration {
                 v5to6(config);
             case 6:
                 v6to7(config);
+            case 7:
+                v7to8(config);
                 break;
             default:
                 logger.severe(MigrationUtils.ERROR_1);
@@ -76,7 +81,7 @@ public class MainMigration {
             System.setProperty("jecon.prefix", config.getString("Database.MySQL.Prefix"));
         }
         config.set("Database.MySQL.Prefix", null);
-        config.set("database.mysql.init", "SET SESSION query_cache_type=0");
+        config.set("database.mysql.init", SAFE_MYSQL_INIT);
         v2DBProperties(config);
         // pool
         move(config, "Database.Poolsize", "database.connectionPool.maximumPoolSize");
@@ -108,6 +113,18 @@ public class MainMigration {
     private static void v6to7(ConfigurationSection config) {
         config.set("hideNonPlayerAccounts", true);
         config.set("version", 7);
+    }
+
+    private static void v7to8(ConfigurationSection config) {
+        // MySQL 8.0 は query cache を削除したので "SET SESSION query_cache_type=0" は
+        // "Unknown system variable" で失敗する。これは connectionInitSql なので、
+        // 失敗するとコネクションプールが初期化できず、プラグインが起動しない。
+        // ユーザーが独自の init を書いている場合は尊重し、既知の廃止値だけ差し替える。
+        String init = config.getString("database.mysql.init");
+        if (init != null && init.contains("query_cache_type")) {
+            config.set("database.mysql.init", SAFE_MYSQL_INIT);
+        }
+        config.set("version", 8);
     }
 
     @SuppressWarnings("SpellCheckingInspection")

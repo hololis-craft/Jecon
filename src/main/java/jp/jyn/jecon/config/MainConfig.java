@@ -1,6 +1,5 @@
 package jp.jyn.jecon.config;
 
-import jp.jyn.jecon.Jecon;
 import org.bukkit.configuration.ConfigurationSection;
 
 import java.io.File;
@@ -19,7 +18,12 @@ public class MainConfig {
     public final FormatConfig format;
     public final DatabaseConfig database;
 
-    MainConfig(ConfigurationSection config) {
+    /**
+     * @param config     config.yml のルートセクション
+     * @param dataFolder SQLite ファイルの相対パス解決に使うプラグインデータフォルダ。
+     *                   Bukkit の singleton を参照しないよう明示的に渡す（テスト可能性のため）。
+     */
+    public MainConfig(ConfigurationSection config, File dataFolder) {
         defaultBalance = new BigDecimal(config.getString("defaultBalance"));
         createAccountOnJoin = config.getBoolean("createAccountOnJoin");
 
@@ -29,7 +33,7 @@ public class MainConfig {
         hideNonPlayerAccounts = config.getBoolean("hideNonPlayerAccounts", true);
 
         format = new FormatConfig(config.getConfigurationSection("format"));
-        database = new DatabaseConfig(config.getConfigurationSection("database"));
+        database = new DatabaseConfig(config.getConfigurationSection("database"), dataFolder);
     }
 
     public final static class FormatConfig {
@@ -72,10 +76,10 @@ public class MainConfig {
         public final long connectionTimeout;
         public final long idleTimeout;
 
-        private DatabaseConfig(ConfigurationSection config) {
+        private DatabaseConfig(ConfigurationSection config, File dataFolder) {
             String type = config.getString("type", "").toLowerCase(Locale.ENGLISH);
             if (type.equals("sqlite")) {
-                File file = new File(Jecon.getInstance().getDataFolder(), config.getString("sqlite.file"));
+                File file = new File(dataFolder, config.getString("sqlite.file"));
                 //noinspection ResultOfMethodCallIgnored
                 file.getParentFile().mkdirs();
                 url = "jdbc:sqlite:" + file.getPath();
@@ -89,7 +93,12 @@ public class MainConfig {
             } else {
                 throw new IllegalArgumentException("Invalid value: database.type(config.yml)");
             }
-            init = config.getString(type + ".init", "/* Jecon */SELECT 1");
+            // SQLite は writer 同士を待ち合わせで解決させたいので busy_timeout を明示する。
+            // driver 既定値に依存させない（Paper 同梱の sqlite-jdbc はバージョンが固定できない）。
+            String defaultInit = type.equals("sqlite")
+                ? "PRAGMA busy_timeout=5000"
+                : "/* Jecon */SELECT 1";
+            init = config.getString(type + ".init", defaultInit);
             String tmp = type + ".properties";
             if (config.contains(tmp)) {
                 for (String key : config.getConfigurationSection(tmp).getKeys(false)) {

@@ -1,7 +1,6 @@
 package jp.jyn.jecon.db.driver;
 
 import com.zaxxer.hikari.HikariDataSource;
-import jp.jyn.jecon.Jecon;
 import jp.jyn.jecon.db.DBMigrationUtils;
 import jp.jyn.jecon.db.Database;
 
@@ -17,8 +16,44 @@ import java.util.Set;
 import java.util.logging.Logger;
 
 public class MySQL extends Database {
-    public MySQL(HikariDataSource hikari) {
-        super(hikari);
+    /** {@code ER_LOCK_DEADLOCK}: InnoDB がデッドロックを検出して片方を巻き戻した。 */
+    private static final int ER_LOCK_DEADLOCK = 1213;
+    /** {@code ER_LOCK_WAIT_TIMEOUT}: 行ロック待ちがタイムアウトした。 */
+    private static final int ER_LOCK_WAIT_TIMEOUT = 1205;
+
+    public MySQL(HikariDataSource hikari, Logger logger) {
+        super(hikari, logger);
+    }
+
+    @Override
+    protected boolean isRetryable(SQLException e) {
+        int code = e.getErrorCode();
+        if (code == ER_LOCK_DEADLOCK || code == ER_LOCK_WAIT_TIMEOUT) {
+            return true;
+        }
+        // 40001 = serialization failure
+        return "40001".equals(e.getSQLState());
+    }
+
+    // account_member の upsert。
+    // VALUES() は MySQL 8.0.20 で deprecated だが、行エイリアス構文 (AS new) は 8.0.19 以降
+    // でしか使えないため、互換性を優先してこちらを使う。
+    private static final String MEMBER_INSERT =
+        "INSERT INTO `account_member` (`account_id`, `member_uuid`, `permissions`) VALUES (?,?,?)";
+
+    @Override
+    protected String sqlMemberSet() {
+        return MEMBER_INSERT + " ON DUPLICATE KEY UPDATE `permissions`=VALUES(`permissions`)";
+    }
+
+    @Override
+    protected String sqlMemberOr() {
+        return MEMBER_INSERT + " ON DUPLICATE KEY UPDATE `permissions`=`permissions`|VALUES(`permissions`)";
+    }
+
+    @Override
+    protected String sqlMemberAndNot() {
+        return MEMBER_INSERT + " ON DUPLICATE KEY UPDATE `permissions`=`permissions`&~?";
     }
 
     @Override
@@ -94,7 +129,6 @@ public class MySQL extends Database {
             return;
         }
 
-        Logger logger = Jecon.getInstance().getLogger();
         logger.info("Migrate MySQL");
 
         if (version.equals("1")) {
@@ -137,8 +171,7 @@ public class MySQL extends Database {
                 String table = resultSet.getString(1);
                 if (table.endsWith("account")) {
                     if (prefix != null) {
-                        Logger logger = Jecon.getInstance().getLogger();
-                        logger.severe(DBMigrationUtils.MIGRATION_ERROR_1);
+                                        logger.severe(DBMigrationUtils.MIGRATION_ERROR_1);
                         logger.severe("This database seems to be used by multiple Jecon.");
                         logger.severe("Since the prefix has been deleted, it is not possible to use one database with multiple Jecon.");
                         logger.severe("To continue processing, start up the server with -Djecon.prefix=<prefix>.");
@@ -154,7 +187,7 @@ public class MySQL extends Database {
     }
 
     private void v1to2(String prefix) {
-        Jecon.getInstance().getLogger().info("prefix: " + prefix);
+        logger.info("prefix: " + prefix);
         try (Connection connection = hikari.getConnection();
              Statement statement = connection.createStatement()) {
             statement.executeUpdate("RENAME TABLE " +
@@ -215,7 +248,6 @@ public class MySQL extends Database {
      * </ul>
      */
     private void v3to4() {
-        Logger logger = Jecon.getInstance().getLogger();
         logger.info("Migrating account/transaction_log to v4 schema");
         try (Connection connection = hikari.getConnection()) {
             connection.setAutoCommit(false);

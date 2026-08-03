@@ -142,11 +142,12 @@ public class VaultUnlockedEconomy implements Economy {
             return false;
         }
         try {
+            // AccountService が account 行と balance 行を同一トランザクションで作るので、
+            // ここで repository.createAccount を重ねて呼ぶ必要はない。
             accountService.createAccount(uuid, name, player);
         } catch (RuntimeException e) {
             return false;
         }
-        repository.createAccount(uuid, BigDecimal.ZERO);
         return true;
     }
 
@@ -307,6 +308,9 @@ public class VaultUnlockedEconomy implements Economy {
                 new EconomyResponse(BigDecimal.ZERO, newBalance, EconomyResponse.ResponseType.FAILURE, "Account missing: " + missing.which());
             case TransferResult.InvalidAmount invalid ->
                 new EconomyResponse(BigDecimal.ZERO, newBalance, EconomyResponse.ResponseType.FAILURE, invalid.reason());
+            case TransferResult.Conflict ignored ->
+                new EconomyResponse(BigDecimal.ZERO, newBalance, EconomyResponse.ResponseType.FAILURE,
+                    "Concurrent modification, please retry");
         };
     }
 
@@ -320,7 +324,6 @@ public class VaultUnlockedEconomy implements Economy {
         } catch (RuntimeException e) {
             return false;
         }
-        repository.createAccount(uuid, BigDecimal.ZERO);
         return true;
     }
 

@@ -45,7 +45,7 @@ public class ConfigLoader {
         if (MainMigration.migration(mainYaml)) {
             plugin.saveConfig();
         }
-        mainConfig = new MainConfig(mainYaml);
+        mainConfig = new MainConfig(mainYaml, plugin.getDataFolder());
 
         File messageFile = resolveMessageFile(mainConfig.locale);
         messageYaml = YamlConfiguration.loadConfiguration(messageFile);

@@ -17,6 +17,7 @@ Economy プラグインの設計判断記録。
 - [ADR-0011 VaultUnlockedAPI を採用し shared account を非 Player 口座に写像、Async は実装しない](./0011-vaultunlocked-shared-account-no-async.md)
 - [ADR-0012 LazyRepository を廃止し Sync 単一モードにする](./0012-drop-lazy-repository.md)
 - [ADR-0013 口座の主キーを UUID とし alias を副次表現とする](./0013-uuid-primary-alias-secondary.md)
+- [ADR-0014 書き込み経路をスレッドセーフにし、任意のスレッドから呼べるようにする](./0014-thread-safe-write-path.md)
 
 ## ステータスの読み方
 

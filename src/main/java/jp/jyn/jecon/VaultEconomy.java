@@ -31,13 +31,18 @@ class VaultEconomy implements Economy {
     public static final String VAULT_BRIDGE_ALIAS = "system:vault_bridge";
     public static final UUID VAULT_BRIDGE_UUID = Aliases.uuidFromAlias(VAULT_BRIDGE_ALIAS);
 
-    private BigDecimal defaultBalance;
+    /**
+     * reload をまたいで差し替える依存の束。
+     *
+     * <p>Vault の呼び出し元は任意のスレッドから来るため、フィールドを個別に書き換えると
+     * 新旧が混ざった状態を観測され得る。immutable な snapshot を単一の volatile で
+     * 差し替えることで、1 回の write が全フィールドを一括公開する。
+     */
+    private record Deps(MainConfig config, Database db, BalanceRepository repository,
+                        TransferService transferService, AccountService accountService,
+                        BigDecimal defaultBalance) {}
 
-    private Database db;
-    private MainConfig config;
-    private BalanceRepository repository;
-    private TransferService transferService;
-    private AccountService accountService;
+    private volatile Deps deps;
 
     VaultEconomy(MainConfig config, Database db, BalanceRepository repository,
                  TransferService transferService, AccountService accountService) {
@@ -46,13 +51,7 @@ class VaultEconomy implements Economy {
 
     void init(MainConfig config, Database db, BalanceRepository repository,
               TransferService transferService, AccountService accountService) {
-        this.db = db;
-        this.config = config;
-        this.repository = repository;
-        this.transferService = transferService;
-        this.accountService = accountService;
-
-        this.defaultBalance = config.defaultBalance;
+        this.deps = new Deps(config, db, repository, transferService, accountService, config.defaultBalance);
     }
 
     @Override
@@ -72,27 +71,28 @@ class VaultEconomy implements Economy {
 
     @Override
     public String format(double v) {
-        return repository.format(v);
+        return deps.repository().format(v);
     }
 
     @Override
     public String currencyNamePlural() {
-        return config.format.pluralMajor;
+        return deps.config().format.pluralMajor;
     }
 
     @Override
     public String currencyNameSingular() {
-        return config.format.singularMajor;
+        return deps.config().format.singularMajor;
     }
 
     @Override
     public boolean hasAccount(String s) {
-        return accountService.resolveAlias(s).map(repository::hasAccount).orElse(false);
+        Deps d = this.deps;
+        return d.accountService().resolveAlias(s).map(d.repository()::hasAccount).orElse(false);
     }
 
     @Override
     public boolean hasAccount(OfflinePlayer offlinePlayer) {
-        return repository.hasAccount(offlinePlayer.getUniqueId());
+        return deps.repository().hasAccount(offlinePlayer.getUniqueId());
     }
 
     @Override
@@ -107,14 +107,15 @@ class VaultEconomy implements Economy {
 
     @Override
     public double getBalance(String s) {
-        return accountService.resolveAlias(s)
-            .map(uuid -> repository.getDouble(uuid).orElse(0D))
+        Deps d = this.deps;
+        return d.accountService().resolveAlias(s)
+            .map(uuid -> d.repository().getDouble(uuid).orElse(0D))
             .orElse(0D);
     }
 
     @Override
     public double getBalance(OfflinePlayer offlinePlayer) {
-        return repository.getDouble(offlinePlayer.getUniqueId()).orElse(0);
+        return deps.repository().getDouble(offlinePlayer.getUniqueId()).orElse(0);
     }
 
     @Override
@@ -129,12 +130,13 @@ class VaultEconomy implements Economy {
 
     @Override
     public boolean has(String s, double v) {
-        return accountService.resolveAlias(s).map(uuid -> repository.has(uuid, v)).orElse(false);
+        Deps d = this.deps;
+        return d.accountService().resolveAlias(s).map(uuid -> d.repository().has(uuid, v)).orElse(false);
     }
 
     @Override
     public boolean has(OfflinePlayer offlinePlayer, double v) {
-        return repository.has(offlinePlayer.getUniqueId(), v);
+        return deps.repository().has(offlinePlayer.getUniqueId(), v);
     }
 
     @Override
@@ -149,19 +151,23 @@ class VaultEconomy implements Economy {
 
     @Override
     public boolean createPlayerAccount(String s) {
-        return accountService.resolveAlias(s).map(uuid -> repository.createAccount(uuid, defaultBalance)).orElse(false);
+        Deps d = this.deps;
+        return d.accountService().resolveAlias(s)
+            .map(uuid -> d.repository().createAccount(uuid, d.defaultBalance()))
+            .orElse(false);
     }
 
     @Override
     public boolean createPlayerAccount(OfflinePlayer offlinePlayer) {
+        Deps d = this.deps;
         UUID uuid = offlinePlayer.getUniqueId();
         String name = offlinePlayer.getName();
         // account 行を確保。名前が判明していれば alias として反映する。
-        db.getOrCreatePlayerId(uuid);
+        d.db().getOrCreatePlayerId(uuid);
         if (name != null && !name.isEmpty()) {
-            db.renameAccount(uuid, name);
+            d.db().renameAccount(uuid, name);
         }
-        return repository.createAccount(uuid, defaultBalance);
+        return d.repository().createAccount(uuid, d.defaultBalance());
     }
 
     @Override
@@ -183,7 +189,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public EconomyResponse withdrawPlayer(String s, double v) {
-        return accountService.resolveAlias(s)
+        return deps.accountService().resolveAlias(s)
             .map(uuid -> withdrawPlayer(uuid, v))
             .orElseGet(() -> new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "User does not exist"));
     }
@@ -212,7 +218,7 @@ class VaultEconomy implements Economy {
 
     @Override
     public EconomyResponse depositPlayer(String s, double v) {
-        return accountService.resolveAlias(s)
+        return deps.accountService().resolveAlias(s)
             .map(uuid -> depositPlayer(uuid, v))
             .orElseGet(() -> new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "User does not exist"));
     }
@@ -233,9 +239,10 @@ class VaultEconomy implements Economy {
     }
 
     private EconomyResponse runVaultTransfer(UUID from, UUID to, double amount, String vaultMethod) {
+        Deps d = this.deps;
         // 対向が player 側の場合、対象口座が存在しなければエラー。
         UUID player = from.equals(VAULT_BRIDGE_UUID) ? to : from;
-        if (!repository.hasAccount(player)) {
+        if (!d.repository().hasAccount(player)) {
             return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Account does not exist");
         }
 
@@ -249,12 +256,12 @@ class VaultEconomy implements Economy {
             .metadata("vault_method", vaultMethod)
             .withOverdraft()  // system:vault_bridge は常時 overdraft
             .build();
-        TransferResult result = transferService.transfer(from, to, decimal, ctx);
-        return mapResult(result, player);
+        TransferResult result = d.transferService().transfer(from, to, decimal, ctx);
+        return mapResult(d, result, player);
     }
 
-    private EconomyResponse mapResult(TransferResult result, UUID player) {
-        double newBalance = repository.getDouble(player).orElse(0D);
+    private EconomyResponse mapResult(Deps d, TransferResult result, UUID player) {
+        double newBalance = d.repository().getDouble(player).orElse(0D);
         return switch (result) {
             case TransferResult.Success s -> {
                 BigDecimal amount = s.legs().isEmpty() ? BigDecimal.ZERO : s.legs().get(0).amount();
@@ -268,6 +275,10 @@ class VaultEconomy implements Economy {
                 new EconomyResponse(0, newBalance, EconomyResponse.ResponseType.NOT_IMPLEMENTED, "Account missing: " + missing.which());
             case TransferResult.InvalidAmount invalid ->
                 new EconomyResponse(0, newBalance, EconomyResponse.ResponseType.FAILURE, invalid.reason());
+            case TransferResult.Conflict ignored ->
+                // 競合し続けて中断した。残高は変わっていないので呼び出し元は再試行できる。
+                new EconomyResponse(0, newBalance, EconomyResponse.ResponseType.FAILURE,
+                    "Concurrent modification, please retry");
         };
     }
 

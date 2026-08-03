@@ -2,6 +2,32 @@ name: CI
 on: [push, pull_request]
 
 jobs:
+  test:
+    name: Test (SQLite + MySQL)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: "21"
+          distribution: "temurin"
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+      - name: Run tests
+        # MySQL は Testcontainers で起動する。-Djecon.test.mysql=true を渡すのは、
+        # Docker が使えない場合に「MySQL 側のテストが黙って skip される」のを防ぐため。
+        # skip されても緑になってしまうと、ロック挙動の driver 差を検証できていないことに
+        # 気付けない (REPEATABLE READ 特有の lost update は SQLite では再現しない)。
+        run: ./gradlew test -Djecon.test.mysql=true
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: build/reports/tests/test
+          retention-days: 7
+
   build:
     name: Gradle build
     runs-on: ubuntu-latest
