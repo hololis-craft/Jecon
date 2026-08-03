@@ -45,8 +45,60 @@ public class SQLite extends Database {
         return primary == SQLITE_BUSY || primary == SQLITE_LOCKED;
     }
 
+    /**
+     * {@code BEGIN IMMEDIATE} でトランザクションを開始する。
+     *
+     * <p>{@code setAutoCommit(false)} は deferred BEGIN になるため、SELECT で read lock を
+     * 取ってから UPDATE で write lock に昇格する形になる。この昇格はデッドロックし得るので
+     * SQLite は busy handler を呼ばずに即 {@code SQLITE_BUSY} を返す（busy_timeout が効かない）。
+     * 最初から write lock を取れば待ち合わせで解決できる。
+     *
+     * <p>autoCommit は true のまま維持し、トランザクション境界は生 SQL で制御する。
+     * {@code setAutoCommit(false)} と併用すると driver 自身の BEGIN と二重になる。
+     */
+    @Override
+    protected void beginTx(Connection connection) throws SQLException {
+        execute(connection, "BEGIN IMMEDIATE");
+    }
+
+    @Override
+    protected void commitTx(Connection connection) throws SQLException {
+        execute(connection, "COMMIT");
+    }
+
+    @Override
+    protected void rollbackTx(Connection connection) throws SQLException {
+        execute(connection, "ROLLBACK");
+    }
+
+    private static void execute(Connection connection, String sql) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute(sql);
+        }
+    }
+
+    /**
+     * WAL に切り替える。reader が writer をブロックしなくなるので、複数接続から
+     * 並行アクセスする前提では必須。DB ファイルに永続する設定なので毎回設定しても無害。
+     */
+    private void enableWriteAheadLog() {
+        try (Connection connection = hikari.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("PRAGMA journal_mode=WAL")) {
+            String mode = rs.next() ? rs.getString(1) : "?";
+            if (!"wal".equalsIgnoreCase(mode)) {
+                // ネットワークファイルシステム上などでは WAL に切り替えられないことがある
+                logger.warning("Could not enable SQLite WAL mode (journal_mode=" + mode + "). " +
+                    "Concurrent access will serialize more aggressively.");
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     @Override
     protected void createTable() {
+        enableWriteAheadLog();
         try (Connection connection = hikari.getConnection();
              Statement statement = connection.createStatement()) {
             statement.executeUpdate(

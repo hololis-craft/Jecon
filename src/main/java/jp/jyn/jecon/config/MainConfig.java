@@ -93,7 +93,12 @@ public class MainConfig {
             } else {
                 throw new IllegalArgumentException("Invalid value: database.type(config.yml)");
             }
-            init = config.getString(type + ".init", "/* Jecon */SELECT 1");
+            // SQLite は writer 同士を待ち合わせで解決させたいので busy_timeout を明示する。
+            // driver 既定値に依存させない（Paper 同梱の sqlite-jdbc はバージョンが固定できない）。
+            String defaultInit = type.equals("sqlite")
+                ? "PRAGMA busy_timeout=5000"
+                : "/* Jecon */SELECT 1";
+            init = config.getString(type + ".init", defaultInit);
             String tmp = type + ".properties";
             if (config.contains(tmp)) {
                 for (String key : config.getConfigurationSection(tmp).getKeys(false)) {

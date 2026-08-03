@@ -40,6 +40,13 @@ database:
   type: sqlite
   sqlite:
     file: "jecon.db"
+    # Executed on every new pooled connection. The default sets a busy timeout
+    # so that concurrent writers wait for each other instead of failing.
+    # Jecon also switches the database to WAL mode on startup, and starts every
+    # write transaction with BEGIN IMMEDIATE (a deferred BEGIN would have to
+    # upgrade a read lock to a write lock, which SQLite fails immediately
+    # without honouring the busy timeout).
+    #init: "PRAGMA busy_timeout=5000"
   mysql:
     host: "localhost:3306"
     name: "jecon"
