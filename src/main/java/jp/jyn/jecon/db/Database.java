@@ -23,6 +23,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.logging.Logger;
 
 public abstract class Database {
@@ -90,6 +91,18 @@ public abstract class Database {
         }
     }
 
+    /**
+     * 単発クエリ用に connection を貸し出す。{@link SQLException} は
+     * {@link RuntimeException} に包み直す（既存の呼び出し規約を維持）。
+     */
+    protected <T> T withConnection(TxFunction<T> work) {
+        try (Connection connection = hikari.getConnection()) {
+            return work.apply(connection);
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     abstract protected void migration();
 
     abstract protected void createTable();
@@ -100,18 +113,20 @@ public abstract class Database {
      * UUID から account.id を引く。存在しなければ空。
      */
     public OptionalInt resolveId(UUID uuid) {
-        try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "SELECT `id` FROM `account` WHERE `uuid`=?"
-             )) {
+        return withConnection(c -> resolveId(c, uuid));
+    }
+
+    /** 呼び出し側のトランザクションに参加する {@link #resolveId(UUID)}。 */
+    public OptionalInt resolveId(Connection connection, UUID uuid) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT `id` FROM `account` WHERE `uuid`=?"
+        )) {
             statement.setBytes(1, UUIDBytes.toBytes(uuid));
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (resultSet.next()) {
                     return OptionalInt.of(resultSet.getInt(1));
                 }
             }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
         }
         return OptionalInt.empty();
     }
@@ -123,32 +138,45 @@ public abstract class Database {
      * 実際の名前が判ったら {@link #renameAccount(UUID, String)} で更新する。
      */
     public int getOrCreatePlayerId(UUID uuid) {
-        OptionalInt existing = resolveId(uuid);
+        return withConnection(c -> getOrCreatePlayerId(c, uuid));
+    }
+
+    /** 呼び出し側のトランザクションに参加する {@link #getOrCreatePlayerId(UUID)}。 */
+    public int getOrCreatePlayerId(Connection connection, UUID uuid) throws SQLException {
+        OptionalInt existing = resolveId(connection, uuid);
         if (existing.isPresent()) {
             return existing.getAsInt();
         }
         String alias = hex(uuid);
         try {
-            insertAccount(uuid, alias, true, null);
+            insertAccount(connection, uuid, alias, true, null);
         } catch (SQLException e) {
             // 並行挿入で UNIQUE 違反した場合の retry
-            OptionalInt retry = resolveId(uuid);
+            OptionalInt retry = resolveId(connection, uuid);
             if (retry.isPresent()) {
                 return retry.getAsInt();
             }
-            throw new RuntimeException(e);
+            throw e;
         }
-        return resolveId(uuid).orElseThrow(() -> new RuntimeException("The ID could not be issued."));
+        return resolveId(connection, uuid)
+            .orElseThrow(() -> new IllegalStateException("The ID could not be issued."));
     }
 
     /**
      * account テーブルに新規行を挿入する。UNIQUE 違反 (uuid / alias 重複) は SQLException を投げる。
      */
     public void insertAccount(UUID uuid, String alias, boolean isPlayer, String namespace) throws SQLException {
-        try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "INSERT INTO `account` (`uuid`, `alias`, `is_player`, `namespace`, `created_at`) VALUES (?,?,?,?,?)"
-             )) {
+        try (Connection connection = hikari.getConnection()) {
+            insertAccount(connection, uuid, alias, isPlayer, namespace);
+        }
+    }
+
+    /** 呼び出し側のトランザクションに参加する {@link #insertAccount(UUID, String, boolean, String)}。 */
+    public void insertAccount(Connection connection, UUID uuid, String alias, boolean isPlayer, String namespace)
+        throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "INSERT INTO `account` (`uuid`, `alias`, `is_player`, `namespace`, `created_at`) VALUES (?,?,?,?,?)"
+        )) {
             statement.setBytes(1, UUIDBytes.toBytes(uuid));
             statement.setString(2, alias);
             statement.setInt(3, isPlayer ? 1 : 0);
@@ -200,10 +228,18 @@ public abstract class Database {
      * alias を新しい値へ差し替える。UNIQUE 違反時は false（呼び出し側でハンドリング）。
      */
     public boolean renameAccount(UUID uuid, String newAlias) {
-        try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "UPDATE `account` SET `alias`=? WHERE `uuid`=?"
-             )) {
+        try (Connection connection = hikari.getConnection()) {
+            return renameAccount(connection, uuid, newAlias);
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** 呼び出し側のトランザクションに参加する {@link #renameAccount(UUID, String)}。 */
+    public boolean renameAccount(Connection connection, UUID uuid, String newAlias) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "UPDATE `account` SET `alias`=? WHERE `uuid`=?"
+        )) {
             statement.setString(1, newAlias);
             statement.setBytes(2, UUIDBytes.toBytes(uuid));
             return statement.executeUpdate() != 0;
@@ -212,7 +248,7 @@ public abstract class Database {
             if (isConstraintViolation(e)) {
                 return false;
             }
-            throw new RuntimeException(e);
+            throw e;
         }
     }
 
@@ -248,10 +284,14 @@ public abstract class Database {
     }
 
     public Optional<AccountRecord> getAccountByUuid(UUID uuid) {
-        try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "SELECT `alias`, `is_player`, `namespace`, `created_at` FROM `account` WHERE `uuid`=?"
-             )) {
+        return withConnection(c -> getAccountByUuid(c, uuid));
+    }
+
+    /** 呼び出し側のトランザクションに参加する {@link #getAccountByUuid(UUID)}。 */
+    public Optional<AccountRecord> getAccountByUuid(Connection connection, UUID uuid) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT `alias`, `is_player`, `namespace`, `created_at` FROM `account` WHERE `uuid`=?"
+        )) {
             statement.setBytes(1, UUIDBytes.toBytes(uuid));
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (resultSet.next()) {
@@ -264,8 +304,6 @@ public abstract class Database {
                     ));
                 }
             }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
         }
         return Optional.empty();
     }
@@ -322,14 +360,16 @@ public abstract class Database {
     }
 
     public boolean deleteAccountRow(UUID uuid) {
-        try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "DELETE FROM `account` WHERE `uuid`=?"
-             )) {
+        return withConnection(c -> deleteAccountRow(c, uuid));
+    }
+
+    /** 呼び出し側のトランザクションに参加する {@link #deleteAccountRow(UUID)}。 */
+    public boolean deleteAccountRow(Connection connection, UUID uuid) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "DELETE FROM `account` WHERE `uuid`=?"
+        )) {
             statement.setBytes(1, UUIDBytes.toBytes(uuid));
             return statement.executeUpdate() != 0;
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
         }
     }
 
@@ -358,22 +398,135 @@ public abstract class Database {
      */
     public void runInTransaction(TxWork work) {
         try (Connection connection = hikari.getConnection()) {
-            connection.setAutoCommit(false);
+            beginTx(connection);
+            boolean committed = false;
             try {
                 work.run(connection);
-                connection.commit();
-            } catch (RuntimeException e) {
-                connection.rollback();
-                throw e;
-            } catch (SQLException e) {
-                connection.rollback();
-                throw new RuntimeException(e);
+                commitTx(connection);
+                committed = true;
             } finally {
-                connection.setAutoCommit(true);
+                if (!committed) {
+                    // rollback 自体の失敗で元の例外を潰さない
+                    try {
+                        rollbackTx(connection);
+                    } catch (SQLException ignored) {
+                        // best effort
+                    }
+                }
             }
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * {@link #runInTransaction(TxWork)} の戻り値あり版。
+     *
+     * <p>{@link RuntimeException} はそのまま伝播する（残高不足などを
+     * transactional escape として使う経路のため）。
+     */
+    public <T> T inTransaction(TxFunction<T> work) {
+        try (Connection connection = hikari.getConnection()) {
+            beginTx(connection);
+            boolean committed = false;
+            try {
+                T result = work.apply(connection);
+                commitTx(connection);
+                committed = true;
+                return result;
+            } finally {
+                if (!committed) {
+                    try {
+                        rollbackTx(connection);
+                    } catch (SQLException ignored) {
+                        // best effort
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * transient な失敗 (MySQL の deadlock / lock wait timeout、SQLite の
+     * {@code SQLITE_BUSY}) を再試行しながらトランザクションを実行する。
+     *
+     * <p>並行書き込みを許す以上これらは異常系ではなく正常系の一部なので、
+     * 書き込み経路は原則こちらを使う。
+     *
+     * <p><b>work は冪等でなければならない。</b>再試行されるため、DB 以外への
+     * 副作用 (event 発火、ログ出力、外部通知) を中に入れてはいけない。
+     *
+     * @throws TransientDatabaseException 上限まで再試行しても成功しなかった場合
+     */
+    public <T> T inTransactionWithRetry(TxFunction<T> work) {
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= MAX_TX_ATTEMPTS; attempt++) {
+            try {
+                return inTransaction(work);
+            } catch (RuntimeException e) {
+                if (!isRetryable(e)) {
+                    throw e;
+                }
+                last = e;
+                if (attempt < MAX_TX_ATTEMPTS) {
+                    backoff(attempt);
+                }
+            }
+        }
+        throw new TransientDatabaseException(
+            "transaction did not succeed after " + MAX_TX_ATTEMPTS + " attempts", last);
+    }
+
+    /** 再試行上限。これを超えたら呼び出し元にエラーを返す。 */
+    private static final int MAX_TX_ATTEMPTS = 4;
+
+    private static void backoff(int attempt) {
+        // 1ms, 2ms, 4ms ... に ±50% のジッタ。tick を跨がない範囲に収める。
+        long base = 1L << (attempt - 1);
+        long millis = base + ThreadLocalRandom.current().nextLong(base + 1);
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new TransientDatabaseException("interrupted while retrying transaction", e);
+        }
+    }
+
+    private boolean isRetryable(RuntimeException e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof SQLException sql && isRetryable(sql)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 再試行して意味のある失敗かを driver 差を吸収して判定する。
+     * 既定では再試行しない（未知の driver を無闇に再試行しない）。
+     */
+    protected boolean isRetryable(SQLException e) {
+        return false;
+    }
+
+    /**
+     * トランザクションを開始する。既定は {@code setAutoCommit(false)}。
+     * SQLite は deferred BEGIN を避けるためオーバーライドする。
+     */
+    protected void beginTx(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+    }
+
+    protected void commitTx(Connection connection) throws SQLException {
+        connection.commit();
+        connection.setAutoCommit(true);
+    }
+
+    protected void rollbackTx(Connection connection) throws SQLException {
+        connection.rollback();
+        connection.setAutoCommit(true);
     }
 
     @FunctionalInterface
@@ -381,10 +534,15 @@ public abstract class Database {
         void run(Connection connection) throws SQLException;
     }
 
+    @FunctionalInterface
+    public interface TxFunction<T> {
+        T apply(Connection connection) throws SQLException;
+    }
+
     /**
      * FOR UPDATE で残高行をロックし、値を返す。MySQL では実際に行ロックが取得される。
-     * SQLite では BEGIN IMMEDIATE 相当により database-level lock で保護されているため、
-     * FOR UPDATE 句が無くても安全な同期が取れる。
+     * SQLite では {@code BEGIN IMMEDIATE} により database-level の write lock を
+     * トランザクション開始時点で取得しているため、FOR UPDATE 句は不要。
      */
     public OptionalLong selectBalanceForUpdate(Connection connection, int id) throws SQLException {
         String sql = supportsSelectForUpdate()
@@ -480,10 +638,14 @@ public abstract class Database {
     // ─── account_member テーブル ─────────────────────────────────────
 
     public int getMemberPermissions(int accountId, UUID member) {
-        try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "SELECT `permissions` FROM `account_member` WHERE `account_id`=? AND `member_uuid`=?"
-             )) {
+        return withConnection(c -> getMemberPermissions(c, accountId, member));
+    }
+
+    /** 呼び出し側のトランザクションに参加する {@link #getMemberPermissions(int, UUID)}。 */
+    public int getMemberPermissions(Connection connection, int accountId, UUID member) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT `permissions` FROM `account_member` WHERE `account_id`=? AND `member_uuid`=?"
+        )) {
             statement.setInt(1, accountId);
             statement.setBytes(2, UUIDBytes.toBytes(member));
             try (ResultSet resultSet = statement.executeQuery()) {
@@ -491,8 +653,6 @@ public abstract class Database {
                     return resultSet.getInt(1);
                 }
             }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
         }
         return -1;
     }
@@ -501,46 +661,48 @@ public abstract class Database {
      * account_member を upsert する。すでに member が居ればビットマスクを上書き。
      */
     public boolean upsertMember(int accountId, UUID member, int permissionMask, boolean createOnly) {
-        int existing = getMemberPermissions(accountId, member);
+        return withConnection(c -> upsertMember(c, accountId, member, permissionMask, createOnly));
+    }
+
+    /** 呼び出し側のトランザクションに参加する {@link #upsertMember(int, UUID, int, boolean)}。 */
+    public boolean upsertMember(Connection connection, int accountId, UUID member, int permissionMask,
+                                boolean createOnly) throws SQLException {
+        int existing = getMemberPermissions(connection, accountId, member);
         if (existing >= 0) {
             if (createOnly) {
                 return false;
             }
-            try (Connection connection = hikari.getConnection();
-                 PreparedStatement statement = connection.prepareStatement(
-                     "UPDATE `account_member` SET `permissions`=? WHERE `account_id`=? AND `member_uuid`=?"
-                 )) {
+            try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE `account_member` SET `permissions`=? WHERE `account_id`=? AND `member_uuid`=?"
+            )) {
                 statement.setInt(1, permissionMask);
                 statement.setInt(2, accountId);
                 statement.setBytes(3, UUIDBytes.toBytes(member));
                 return statement.executeUpdate() != 0;
-            } catch (SQLException e) {
-                throw new RuntimeException(e);
             }
         }
-        try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "INSERT INTO `account_member` (`account_id`, `member_uuid`, `permissions`) VALUES (?,?,?)"
-             )) {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "INSERT INTO `account_member` (`account_id`, `member_uuid`, `permissions`) VALUES (?,?,?)"
+        )) {
             statement.setInt(1, accountId);
             statement.setBytes(2, UUIDBytes.toBytes(member));
             statement.setInt(3, permissionMask);
             return statement.executeUpdate() != 0;
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
         }
     }
 
     public boolean removeMember(int accountId, UUID member) {
-        try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "DELETE FROM `account_member` WHERE `account_id`=? AND `member_uuid`=?"
-             )) {
+        return withConnection(c -> removeMember(c, accountId, member));
+    }
+
+    /** 呼び出し側のトランザクションに参加する {@link #removeMember(int, UUID)}。 */
+    public boolean removeMember(Connection connection, int accountId, UUID member) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "DELETE FROM `account_member` WHERE `account_id`=? AND `member_uuid`=?"
+        )) {
             statement.setInt(1, accountId);
             statement.setBytes(2, UUIDBytes.toBytes(member));
             return statement.executeUpdate() != 0;
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
         }
     }
 
@@ -563,58 +725,74 @@ public abstract class Database {
     }
 
     public boolean deleteAllMembers(int accountId) {
-        try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "DELETE FROM `account_member` WHERE `account_id`=?"
-             )) {
+        return withConnection(c -> deleteAllMembers(c, accountId));
+    }
+
+    /** 呼び出し側のトランザクションに参加する {@link #deleteAllMembers(int)}。 */
+    public boolean deleteAllMembers(Connection connection, int accountId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "DELETE FROM `account_member` WHERE `account_id`=?"
+        )) {
             statement.setInt(1, accountId);
             return statement.executeUpdate() != 0;
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
         }
     }
 
     // ─── balance テーブル ────────────────────────────────────────────
 
     public OptionalLong getBalance(int id) {
-        try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "SELECT `balance` FROM `balance` WHERE `id`=?"
-             )) {
+        return withConnection(c -> getBalance(c, id));
+    }
+
+    /** 呼び出し側のトランザクションに参加する {@link #getBalance(int)}（ロックは取らない）。 */
+    public OptionalLong getBalance(Connection connection, int id) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT `balance` FROM `balance` WHERE `id`=?"
+        )) {
             statement.setInt(1, id);
             try (ResultSet resultSet = statement.executeQuery()) {
                 if (resultSet.next()) {
                     return OptionalLong.of(resultSet.getLong(1));
                 }
             }
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
         }
         return OptionalLong.empty();
     }
 
     public boolean createBalance(int id, long balance) {
-        try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "INSERT INTO `balance` VALUES(?,?)"
-             )) {
+        return withConnection(c -> createBalance(c, id, balance));
+    }
+
+    /**
+     * 呼び出し側のトランザクションに参加する {@link #createBalance(int, long)}。
+     * 既に行がある場合は制約違反を吸収して false を返す。
+     */
+    public boolean createBalance(Connection connection, int id, long balance) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "INSERT INTO `balance` VALUES(?,?)"
+        )) {
             statement.setInt(1, id);
             statement.setLong(2, balance);
             return statement.executeUpdate() != 0;
         } catch (SQLException e) {
-            throw new RuntimeException(e);
+            if (isConstraintViolation(e)) {
+                return false;
+            }
+            throw e;
         }
     }
 
     public boolean removeBalance(int id) {
-        try (Connection connection = hikari.getConnection();
-             PreparedStatement statement = connection.prepareStatement(
-                 "DELETE FROM `balance` WHERE `id`=?"
-             )) {
+        return withConnection(c -> removeBalance(c, id));
+    }
+
+    /** 呼び出し側のトランザクションに参加する {@link #removeBalance(int)}。 */
+    public boolean removeBalance(Connection connection, int id) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "DELETE FROM `balance` WHERE `id`=?"
+        )) {
             statement.setInt(1, id);
-            return (statement.executeUpdate() != 0);
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+            return statement.executeUpdate() != 0;
         }
     }
 

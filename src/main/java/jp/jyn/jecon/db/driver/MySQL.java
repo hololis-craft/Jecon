@@ -16,8 +16,23 @@ import java.util.Set;
 import java.util.logging.Logger;
 
 public class MySQL extends Database {
+    /** {@code ER_LOCK_DEADLOCK}: InnoDB がデッドロックを検出して片方を巻き戻した。 */
+    private static final int ER_LOCK_DEADLOCK = 1213;
+    /** {@code ER_LOCK_WAIT_TIMEOUT}: 行ロック待ちがタイムアウトした。 */
+    private static final int ER_LOCK_WAIT_TIMEOUT = 1205;
+
     public MySQL(HikariDataSource hikari, Logger logger) {
         super(hikari, logger);
+    }
+
+    @Override
+    protected boolean isRetryable(SQLException e) {
+        int code = e.getErrorCode();
+        if (code == ER_LOCK_DEADLOCK || code == ER_LOCK_WAIT_TIMEOUT) {
+            return true;
+        }
+        // 40001 = serialization failure
+        return "40001".equals(e.getSQLState());
     }
 
     @Override

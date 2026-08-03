@@ -26,6 +26,10 @@ public class SQLite extends Database {
         return false;
     }
 
+    /** {@code SQLITE_BUSY} / {@code SQLITE_LOCKED}。write lock が取れなかった場合。 */
+    private static final int SQLITE_BUSY = 5;
+    private static final int SQLITE_LOCKED = 6;
+
     @Override
     protected boolean isConstraintViolation(SQLException e) {
         // sqlite-jdbc は SQLState を設定せず vendor code のみを返す。
@@ -33,6 +37,12 @@ public class SQLite extends Database {
             return true;
         }
         return super.isConstraintViolation(e);
+    }
+
+    @Override
+    protected boolean isRetryable(SQLException e) {
+        int primary = e.getErrorCode() & 0xFF;
+        return primary == SQLITE_BUSY || primary == SQLITE_LOCKED;
     }
 
     @Override
